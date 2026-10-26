@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Expenses">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Add Expense</title>
+<style>
+  :root {
+    --bg: #eef2f7; --card: #ffffff; --text: #0f172a; --muted: #64748b;
+    --line: #cbd5e1; --field: #f8fafc; --accent: #2563eb; --ok: #15803d; --err: #b91c1c;
+    --warn: #b45309; --banner: #eef4ff; --bannerline: #c7d8f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1220; --card: #141c2e; --text: #e8edf6; --muted: #94a3b8;
+      --line: #2b3650; --field: #0f1626; --accent: #3b82f6; --ok: #4ade80; --err: #f87171;
+      --warn: #fbbf24; --banner: #16233f; --bannerline: #2b3f6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; padding-top: calc(16px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  .card { max-width: 440px; margin: 0 auto; background: var(--card); border-radius: 16px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  h1 { font-size: 20px; margin: 0; }
+  .chip { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--ok); }
+  .chip.off { color: var(--warn); }
+  .who { margin: 2px 0 12px; color: var(--muted); font-size: 14px; }
+  .banner { margin: 0 0 4px; padding: 10px 12px; border-radius: 10px; font-size: 14px; background: var(--banner); border: 1px solid var(--bannerline); }
+  .banner b { white-space: nowrap; }
+  .banner small { display: block; color: var(--muted); margin-top: 2px; }
+  .neg { color: var(--err); }
+  label { display: block; margin: 14px 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  input, select { width: 100%; padding: 12px; font-size: 16px; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 10px; }
+  input:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  input[readonly] { color: var(--muted); }
+  .amount-wrap { position: relative; }
+  .amount-wrap span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-weight: 600; }
+  #amount { padding-left: 58px; font-size: 22px; font-weight: 600; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; min-width: 0; }
+  button { font: inherit; }
+  .primary { width: 100%; margin-top: 22px; padding: 14px; font-size: 17px; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 12px; }
+  .primary:disabled { opacity: .6; }
+  .small { padding: 8px 12px; font-size: 14px; font-weight: 600; color: var(--accent); background: transparent; border: 1px solid var(--line); border-radius: 8px; }
+  #status { min-height: 22px; margin: 12px 0 0; text-align: center; font-weight: 600; }
+  #status.ok { color: var(--ok); } #status.err { color: var(--err); } #status.warn { color: var(--warn); }
+  #after { margin: 6px 0 0; text-align: center; font-size: 14px; color: var(--muted); }
+  #queueBox { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; }
+  #queueBox summary { cursor: pointer; font-weight: 600; }
+  .qrow { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .qrow:last-child { border-bottom: 0; }
+  .qrow .meta { color: var(--muted); font-size: 13px; }
+  .qrow .bad { color: var(--err); font-size: 13px; }
+  .qrow button { margin: 6px 6px 0 0; padding: 4px 10px; font-size: 13px; }
+  .foot { margin: 18px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
+  .foot a { color: var(--muted); text-decoration: underline; cursor: pointer; }
+  .hint { font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="top"><h1>Add New Expense</h1><span id="net" class="chip">Online</span></div>
+  <p class="who" id="who"></p>
+
+  <!-- First-run setup (only shown if the phone has no saved link) -->
+  <section id="setup" hidden>
+    <p class="hint">Open the personal link for this phone, or fill these in once. You can copy the values from the Apps Script log (run <b>showLinks()</b>).</p>
+    <label for="sApi">Web app URL (ends in /exec)</label>
+    <input id="sApi" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+    <label for="sKey">Secret key</label>
+    <input id="sKey" type="text" autocomplete="off">
+    <div class="row">
+      <div><label for="sPerson">Your name</label><input id="sPerson" type="text" autocomplete="off"></div>
+      <div><label for="sDevice">Device</label><select id="sDevice"><option>Android</option><option>iPhone</option><option>Other</option></select></div>
+    </div>
+    <button id="sSave" class="primary" type="button">Save setup</button>
+    <p id="sMsg" class="hint"></p>
+  </section>
+
+  <section id="app" hidden>
+    <p class="banner" id="banner" hidden></p>
+
+    <label for="amount">Amount (<span id="cur">PKR</span>) *</label>
+    <div class="amount-wrap"><span id="curTag">PKR</span><input id="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
+
+    <label for="category">Category *</label>
+    <select id="category"></select>
+
+    <div class="row">
+      <div><label for="type">Kakeibo type</label><select id="type"></select></div>
+      <div><label for="payment">Payment mode</label><select id="payment"></select></div>
+    </div>
+
+    <div class="row">
+      <div><label for="date">Date</label><input id="date" type="date"></div>
+      <div><label for="time">Time</label><input id="time" type="time"></div>
+    </div>
+
+    <label for="remarks">Remarks / purpose</label>
+    <input id="remarks" type="text" maxlength="200" placeholder="e.g. Monthly groceries, lunch, cab" autocomplete="off">
+
+    <label for="device">Device logged</label>
+    <input id="device" type="text" readonly>
+
+    <button id="save" class="primary" type="button">Save Record</button>
+    <p id="status" role="status"></p>
+    <p id="after"></p>
+
+    <div id="queueBox" hidden>
+      <details id="qd"><summary id="qsum"></summary><div id="qlist"></div></details>
+      <button id="syncBtn" class="small" type="button" style="margin-top:10px">Sync now</button>
+    </div>
+  </section>
+
+  <p class="foot"><a id="resetLink">Reset this app</a></p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+  var store = {
+    get: function (k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+    del: function (k) { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+  var PERMANENT = /^Invalid (key|amount|date|time)/;
+
+  var conn = null;     // { api, key, person, device }
+  var cfg = null;      // last config from the server (categories, types, payments, budget...)
+  var queue = [];      // entries saved on this phone, waiting to reach the sheet
+  var syncing = false, lastNote = '';
+
+  function newId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function detectDevice() {
+    var ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/i.test(ua)) return 'iPhone';
+    if (/Android/i.test(ua)) return 'Android';
+    return 'Other';
+  }
+  function todayStr() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function setNow() { var d = new Date(); $('date').value = todayStr(); $('time').value = pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function cur() { return (cfg && cfg.currency) || 'PKR'; }
+  function money(n) { return cur() + ' ' + Math.abs(Math.round(n)).toLocaleString(); }
+  function say(msg, kind) { $('status').textContent = msg; $('status').className = kind || ''; }
+
+  // ---------- state ----------
+  function loadState() {
+    conn = store.get('conn'); cfg = store.get('cfg'); queue = store.get('queue') || [];
+    // A personal link carries the connection details; keep them in the URL too (iPhone Home Screen apps have separate storage).
+    var p = new URLSearchParams(location.search);
+    if (p.get('api') && p.get('key')) {
+      conn = { api: p.get('api'), key: p.get('key'), person: p.get('person') || '', device: p.get('device') || '' };
+      store.set('conn', conn);
+    }
+  }
+  function saveQueue() { store.set('queue', queue); }
+
+  // ---------- budget banner (works offline: last known figures minus entries not yet synced) ----------
+  function weekOf(dateStr) { return Math.floor((parseInt(dateStr.slice(8, 10), 10) - 1) / 7) + 1; }
+  function estimate() {
+    var b = cfg && cfg.budget;
+    if (!b || !b.hasPlan) return null;
+    var wl = b.weekLeft, ml = b.monthLeft, pending = 0;
+    queue.forEach(function (e) {
+      if (e.failed) return;
+      pending++;
+      var p = e.payload;
+      if (p.type === 'Savings' || (cfg.fixed || []).indexOf(p.category) !== -1) return;
+      if (String(p.date).slice(0, 7) === b.ym) { ml -= p.amount; if (weekOf(p.date) === b.week) wl -= p.amount; }
+    });
+    return { week: b.week, weekLeft: wl, monthLeft: ml, pending: pending };
+  }
+  function leftHtml(n) { return n < 0 ? '<b class="neg">over by ' + money(n) + '</b>' : '<b>' + money(n) + '</b> left'; }
+  function renderBanner() {
+    var est = estimate(), box = $('banner');
+    if (!est) { box.hidden = true; return; }
+    var html = 'Week ' + est.week + ': ' + leftHtml(est.weekLeft) + ' &middot; Month: ' + leftHtml(est.monthLeft);
+    if (est.pending) html += '<small>Estimate: ' + est.pending + ' entr' + (est.pending === 1 ? 'y' : 'ies') + ' not synced yet</small>';
+    else if (!navigator.onLine) html += '<small>Offline: last known figures</small>';
+    box.innerHTML = html; box.hidden = false;
+  }
+
+  // ---------- form ----------
+  function fill(sel, items) {
+    var keep = sel.value; sel.innerHTML = '';
+    (items || []).forEach(function (t) { var o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o); });
+    if (keep && (items || []).indexOf(keep) >= 0) sel.value = keep;
+  }
+  function syncType() { if (cfg && cfg.types) $('type').value = cfg.types[$('category').value] || 'Extra'; }
+  function buildForm() {
+    if (!cfg) return;
+    $('cur').textContent = cur(); $('curTag').textContent = cur();
+    fill($('category'), cfg.categories); fill($('type'), cfg.kakeiboTypes); fill($('payment'), cfg.payments);
+    syncType();
+  }
+
+  // ---------- pending list ----------
+  function renderQueue() {
+    var box = $('queueBox');
+    if (!queue.length) { box.hidden = true; return; }
+    box.hidden = false;
+    var failed = queue.filter(function (e) { return e.failed; }).length;
+    var waiting = queue.length - failed;
+    $('qsum').textContent = waiting + ' waiting to sync' + (failed ? ', ' + failed + ' need attention' : '');
+    $('qlist').innerHTML = queue.map(function (e) {
+      var p = e.payload;
+      return '<div class="qrow"><div><b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.category) + '</div>' +
+        '<div class="meta">' + esc(p.date) + ' ' + esc(p.time) + (p.remarks ? ' &middot; ' + esc(p.remarks) : '') + '</div>' +
+        (e.failed ? '<div class="bad">Not saved: ' + esc(e.error) + '</div><button class="small" data-act="retry" data-id="' + esc(e.id) + '">Retry</button>'
+                  : '<div class="meta">Waiting to sync</div>') +
+        '<button class="small" data-act="del" data-id="' + esc(e.id) + '">Delete</button></div>';
+    }).join('');
+  }
+
+  function render() {
+    var net = $('net');
+    net.textContent = navigator.onLine ? 'Online' : 'Offline';
+    net.className = 'chip' + (navigator.onLine ? '' : ' off');
+    $('setup').hidden = !!conn; $('app').hidden = !conn;
+    $('who').textContent = conn ? (conn.person ? 'Logging as ' + conn.person : 'No name set in this link') : 'First-time setup';
+    if (!conn) return;
+    $('device').value = conn.device || detectDevice();
+    renderBanner(); renderQueue();
+  }
+
+  // ---------- talking to Google ----------
+  function loadConfig() {
+    if (!conn) return Promise.resolve();
+    var url = conn.api + (conn.api.indexOf('?') < 0 ? '?' : '&') + 'action=config&key=' + encodeURIComponent(conn.key);
+    return fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && j.ok) { cfg = j; store.set('cfg', cfg); buildForm(); render(); }
+      else if (!cfg) { say((j && j.error) || 'Could not load your categories', 'err'); }
+    }).catch(function () {
+      if (!cfg) say('Connect to the internet once to load your categories', 'warn');
+    });
+  }
+
+  function postEntry(e) {
+    var body = JSON.stringify(Object.assign({ key: conn.key }, e.payload));
+    return fetch(conn.api, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
+      .then(function (r) { return r.text(); })
+      .then(function (t) { try { return JSON.parse(t); } catch (x) { throw new Error('bad-response'); } });
+  }
+
+  function noteFor(res) {
+    if (res.fund) return 'Paid from your ' + esc(res.fund.name) + ' fund: ' + (res.fund.balance < 0 ? 'overdrawn by <b>' + money(res.fund.balance) + '</b>' : 'balance now <b>' + money(res.fund.balance) + '</b>');
+    if (res.saving) return 'Savings / investment: not counted as spending.';
+    if (res.fixed) return 'Fixed cost: not counted against your weekly allowance.';
+    return '';
+  }
+
+  function sync() {
+    if (syncing || !conn || !queue.length) { render(); return Promise.resolve(); }
+    syncing = true; var synced = false, problem = '';
+    function next() {
+      var e = queue.filter(function (x) { return !x.failed; })[0];
+      if (!e) return Promise.resolve();
+      return postEntry(e).then(function (res) {
+        if (res && res.ok) {
+          queue = queue.filter(function (x) { return x !== e; }); saveQueue(); synced = true;
+          if (res.budget && cfg) { cfg.budget = res.budget; store.set('cfg', cfg); }
+          lastNote = noteFor(res);
+          return next();
+        }
+        var msg = (res && res.error) || 'Rejected';
+        if (PERMANENT.test(msg)) { e.failed = true; e.error = msg; saveQueue(); return next(); }
+        problem = msg;                       // temporary server problem: keep the entry and try again later
+      });
+    }
+    return next().catch(function () { problem = navigator.onLine ? 'Cannot reach the server' : 'Offline'; })
+      .then(function () {
+        syncing = false;
+        var failed = queue.filter(function (e) { return e.failed; }).length;
+        var waiting = queue.length - failed;
+        if (failed) say(failed + ' entr' + (failed === 1 ? 'y needs' : 'ies need') + ' attention', 'err');
+        else if (waiting) say('Saved on this phone: ' + waiting + ' waiting to sync' + (problem && navigator.onLine ? ' (' + problem + ')' : ''), 'warn');
+        else if (synced) { say('Synced to your sheet \u2713', 'ok'); $('after').innerHTML = lastNote; }
+        render();
+      });
+  }
+
+  // ---------- events ----------
+  $('category').addEventListener('change', syncType);
+
+  $('save').addEventListener('click', function () {
+    var amount = parseFloat(($('amount').value || '').replace(/,/g, ''));
+    if (!isFinite(amount) || amount <= 0) { say('Enter a valid amount', 'err'); $('amount').focus(); return; }
+    if (!cfg) { say('Connect to the internet once to load your categories', 'err'); return; }
+    var id = newId();
+    queue.push({ id: id, savedAt: Date.now(), payload: {
+      id: id, amount: amount, category: $('category').value, type: $('type').value, payment: $('payment').value,
+      remarks: $('remarks').value, device: $('device').value, person: conn.person,
+      date: $('date').value || todayStr(), time: $('time').value || ''
+    } });
+    saveQueue();
+    $('amount').value = ''; $('remarks').value = ''; setNow(); $('after').innerHTML = '';
+    say('Saved on this phone \u2713', 'ok');
+    render();
+    sync();
+  });
+
+  $('syncBtn').addEventListener('click', function () { say('Syncing...', ''); sync().then(function () { loadConfig(); }); });
+
+  $('qlist').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button'); if (!b) return;
+    var id = b.getAttribute('data-id'), act = b.getAttribute('data-act');
+    if (act === 'del') { queue = queue.filter(function (e) { return e.id !== id; }); saveQueue(); render(); }
+    if (act === 'retry') { queue.forEach(function (e) { if (e.id === id) { e.failed = false; e.error = ''; } }); saveQueue(); render(); sync(); }
+  });
+
+  $('sSave').addEventListener('click', function () {
+    var api = $('sApi').value.trim(), key = $('sKey').value.trim();
+    if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(api) || !key) { $('sMsg').textContent = 'Enter the full /exec URL and the secret key.'; return; }
+    conn = { api: api, key: key, person: $('sPerson').value.trim(), device: $('sDevice').value };
+    store.set('conn', conn); init();
+  });
+
+  $('resetLink').addEventListener('click', function () {
+    var n = queue.length;
+    if (n && !confirm(n + ' entries have not reached your sheet yet and will be lost. Reset anyway?')) return;
+    if (!n && !confirm('Reset this app on this phone?')) return;
+    store.del('conn'); store.del('cfg'); store.del('queue');
+    conn = null; cfg = null; queue = []; render();
+  });
+
+  window.addEventListener('online', function () { render(); sync().then(loadConfig); });
+  window.addEventListener('offline', render);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { render(); sync().then(loadConfig); } });
+  setInterval(function () { if (queue.some(function (e) { return !e.failed; })) sync(); }, 30000);
+
+  function init() {
+    render();
+    if (!conn) return;
+    buildForm(); setNow();
+    loadConfig(); sync();
+  }
+
+  loadState();
+  if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
+  init();
+  if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
+})();
+</script>
+</body>
+</html>
