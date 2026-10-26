@@ -116,6 +116,7 @@
 
     <button id="save" class="primary" type="button">Save Record</button>
     <p id="status" role="status"></p>
+    <p style="text-align:center;margin:6px 0 0"><button id="retryCfg" class="small" type="button" hidden>Try again</button></p>
     <p id="after"></p>
 
     <div id="queueBox" hidden>
@@ -242,14 +243,23 @@
   }
 
   // ---------- talking to Google ----------
+  var cfgMsg = '';
+  function configProblem(msg) {
+    // Only nag when we have nothing cached, or the server said something is wrong (not just "no signal").
+    if (!cfg || msg.kind === 'server') { cfgMsg = msg.text; say(msg.text, 'err'); }
+    $('retryCfg').hidden = !!cfg;
+  }
   function loadConfig() {
     if (!conn) return Promise.resolve();
     var url = conn.api + (conn.api.indexOf('?') < 0 ? '?' : '&') + 'action=config&key=' + encodeURIComponent(conn.key);
-    return fetch(url).then(function (r) { return r.json(); }).then(function (j) {
-      if (j && j.ok) { cfg = j; store.set('cfg', cfg); buildForm(); render(); }
-      else if (!cfg) { say((j && j.error) || 'Could not load your categories', 'err'); }
+    return fetch(url).then(function (r) { return r.text(); }).then(function (t) {
+      var j = null; try { j = JSON.parse(t); } catch (x) {}
+      if (j && j.ok) { cfg = j; store.set('cfg', cfg); buildForm(); render(); $('retryCfg').hidden = true; if (cfgMsg && $('status').textContent === cfgMsg) { say('', ''); cfgMsg = ''; } }
+      else if (j) { configProblem({ kind: 'server', text: 'Google said: ' + (j.error || 'rejected') + '. Check the secret key in your link.' }); }
+      else { configProblem({ kind: 'server', text: 'Google sent a web page instead of data. In Apps Script use Deploy > Manage deployments > Edit > New version > Deploy, and make sure access is set to Anyone.' }); }
     }).catch(function () {
-      if (!cfg) say('Connect to the internet once to load your categories', 'warn');
+      if (navigator.onLine) configProblem({ kind: 'server', text: 'Could not reach your Google script. Check the link (it must end in /exec) and that access is set to Anyone.' });
+      else configProblem({ kind: 'network', text: 'Offline. Connect once to load your categories.' });
     });
   }
 
@@ -317,6 +327,7 @@
     sync();
   });
 
+  $('retryCfg').addEventListener('click', function () { say('Trying...', ''); loadConfig(); });
   $('syncBtn').addEventListener('click', function () { say('Syncing...', ''); sync().then(function () { loadConfig(); }); });
 
   $('qlist').addEventListener('click', function (ev) {
