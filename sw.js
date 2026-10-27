@@ -1,7 +1,9 @@
-/* Service worker: keeps the app shell available offline.
-   Bump CACHE when you change index.html so phones pick up the new version. */
-const CACHE = 'expense-app-v1';
-const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
+/* Service worker (Android): keeps the app available offline and sends waiting entries in the background.
+   Bump CACHE whenever you change any app file so phones pick up the new version. */
+importScripts('core.js');
+
+const CACHE = 'expense-app-v3';
+const SHELL = ['./', './index.html', './core.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
@@ -15,7 +17,7 @@ self.addEventListener('activate', function (e) {
   );
 });
 
-// Page loads: try the network for up to 3 seconds (so updates arrive), otherwise use the cached copy.
+// Page loads: try the network for up to 3 seconds (so updates arrive), otherwise use the saved copy.
 function pageNetworkFirst(req) {
   return new Promise(function (resolve) {
     var done = false;
@@ -46,4 +48,10 @@ self.addEventListener('fetch', function (e) {
       });
     })
   );
+});
+
+// Android Chrome wakes this up when the connection returns, even if the app is closed.
+self.addEventListener('sync', function (e) {
+  if (e.tag !== 'sync-expenses') return;
+  e.waitUntil(Core.syncQueue().then(function (r) { if (r.retry) throw new Error('retry later'); }));   // throwing asks Chrome to try again
 });

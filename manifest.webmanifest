@@ -5,6 +5,7 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#eef2f7",
   "theme_color": "#2563eb",
   "icons": [

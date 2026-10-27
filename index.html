@@ -4,12 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#2563eb">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Expenses">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
 <title>Add Expense</title>
 <style>
   :root {
@@ -24,12 +20,10 @@
       --warn: #fbbf24; --banner: #16233f; --bannerline: #2b3f6b;
     }
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
-    margin: 0; padding: 16px; padding-top: calc(16px + env(safe-area-inset-top, 0px));
-    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    background: var(--bg); color: var(--text);
-    font: 16px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font: 16px/1.4 Roboto, "Segoe UI", Arial, sans-serif;
   }
   .card { max-width: 440px; margin: 0 auto; background: var(--card); border-radius: 16px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
   .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -65,7 +59,7 @@
   .qrow .bad { color: var(--err); font-size: 13px; }
   .qrow button { margin: 6px 6px 0 0; padding: 4px 10px; font-size: 13px; }
   .foot { margin: 18px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
-  .foot a { color: var(--muted); text-decoration: underline; cursor: pointer; }
+  .foot a { color: var(--muted); text-decoration: underline; cursor: pointer; margin: 0 8px; }
   .hint { font-size: 14px; color: var(--muted); }
 </style>
 </head>
@@ -74,16 +68,16 @@
   <div class="top"><h1>Add New Expense</h1><span id="net" class="chip">Online</span></div>
   <p class="who" id="who"></p>
 
-  <!-- First-run setup (only shown if the phone has no saved link) -->
+  <!-- First-time setup (only shown if this phone has no saved link) -->
   <section id="setup" hidden>
-    <p class="hint">Open the personal link for this phone, or fill these in once. You can copy the values from the Apps Script log (run <b>showLinks()</b>).</p>
+    <p class="hint">Open the personal link for this phone, or fill these in once. Run <b>showLinks()</b> in Apps Script to see the values.</p>
     <label for="sApi">Web app URL (ends in /exec)</label>
     <input id="sApi" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
     <label for="sKey">Secret key</label>
     <input id="sKey" type="text" autocomplete="off">
     <div class="row">
       <div><label for="sPerson">Your name</label><input id="sPerson" type="text" autocomplete="off"></div>
-      <div><label for="sDevice">Device</label><select id="sDevice"><option>Android</option><option>iPhone</option><option>Other</option></select></div>
+      <div><label for="sDevice">Device name</label><input id="sDevice" type="text" value="Android" autocomplete="off"></div>
     </div>
     <button id="sSave" class="primary" type="button">Save setup</button>
     <p id="sMsg" class="hint"></p>
@@ -125,56 +119,33 @@
     </div>
   </section>
 
-  <p class="foot"><a id="resetLink">Reset this app</a></p>
+  <p class="foot"><a id="installBtn" hidden>Install app</a><a id="resetLink">Reset this app</a></p>
 </main>
 
+<script src="core.js"></script>
 <script>
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var pad = function (n) { return (n < 10 ? '0' : '') + n; };
-  var store = {
-    get: function (k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
-    set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
-    del: function (k) { try { localStorage.removeItem(k); } catch (e) {} }
-  };
-  var PERMANENT = /^Invalid (key|amount|date|time)/;
 
   var conn = null;     // { api, key, person, device }
-  var cfg = null;      // last config from the server (categories, types, payments, budget...)
-  var queue = [];      // entries saved on this phone, waiting to reach the sheet
-  var syncing = false, lastNote = '';
+  var cfg = null;      // last lists + budget from Google (kept for offline use)
+  var queue = [];      // entries saved on this phone and not yet in the sheet
+  var syncing = false, cfgMsg = '', installPrompt = null;
 
   function newId() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return Date.now() + '-' + Math.random().toString(36).slice(2, 10);
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
-  function detectDevice() {
-    var ua = navigator.userAgent || '';
-    if (/iPhone|iPad|iPod/i.test(ua)) return 'iPhone';
-    if (/Android/i.test(ua)) return 'Android';
-    return 'Other';
-  }
   function todayStr() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function setNow() { var d = new Date(); $('date').value = todayStr(); $('time').value = pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function cur() { return (cfg && cfg.currency) || 'PKR'; }
   function money(n) { return cur() + ' ' + Math.abs(Math.round(n)).toLocaleString(); }
   function say(msg, kind) { $('status').textContent = msg; $('status').className = kind || ''; }
 
-  // ---------- state ----------
-  function loadState() {
-    conn = store.get('conn'); cfg = store.get('cfg'); queue = store.get('queue') || [];
-    // A personal link carries the connection details; keep them in the URL too (iPhone Home Screen apps have separate storage).
-    var p = new URLSearchParams(location.search);
-    if (p.get('api') && p.get('key')) {
-      conn = { api: p.get('api'), key: p.get('key'), person: p.get('person') || '', device: p.get('device') || '' };
-      store.set('conn', conn);
-    }
-  }
-  function saveQueue() { store.set('queue', queue); }
-
-  // ---------- budget banner (works offline: last known figures minus entries not yet synced) ----------
+  // ---------- budget banner: last known figures minus entries not yet synced (works offline) ----------
   function weekOf(dateStr) { return Math.floor((parseInt(dateStr.slice(8, 10), 10) - 1) / 7) + 1; }
   function estimate() {
     var b = cfg && cfg.budget;
@@ -213,14 +184,13 @@
     syncType();
   }
 
-  // ---------- pending list ----------
+  // ---------- waiting entries ----------
   function renderQueue() {
     var box = $('queueBox');
     if (!queue.length) { box.hidden = true; return; }
     box.hidden = false;
     var failed = queue.filter(function (e) { return e.failed; }).length;
-    var waiting = queue.length - failed;
-    $('qsum').textContent = waiting + ' waiting to sync' + (failed ? ', ' + failed + ' need attention' : '');
+    $('qsum').textContent = (queue.length - failed) + ' waiting to sync' + (failed ? ', ' + failed + ' need attention' : '');
     $('qlist').innerHTML = queue.map(function (e) {
       var p = e.payload;
       return '<div class="qrow"><div><b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.category) + '</div>' +
@@ -238,135 +208,153 @@
     $('setup').hidden = !!conn; $('app').hidden = !conn;
     $('who').textContent = conn ? (conn.person ? 'Logging as ' + conn.person : 'No name set in this link') : 'First-time setup';
     if (!conn) return;
-    $('device').value = conn.device || detectDevice();
+    $('device').value = conn.device || 'Android';
     renderBanner(); renderQueue();
   }
 
-  // ---------- talking to Google ----------
-  var cfgMsg = '';
-  function configProblem(msg) {
-    // Only nag when we have nothing cached, or the server said something is wrong (not just "no signal").
-    if (!cfg || msg.kind === 'server') { cfgMsg = msg.text; say(msg.text, 'err'); }
-    $('retryCfg').hidden = !!cfg;
-  }
-  function loadConfig() {
-    if (!conn) return Promise.resolve();
-    var url = conn.api + (conn.api.indexOf('?') < 0 ? '?' : '&') + 'action=config&key=' + encodeURIComponent(conn.key);
-    return fetch(url).then(function (r) { return r.text(); }).then(function (t) {
-      var j = null; try { j = JSON.parse(t); } catch (x) {}
-      if (j && j.ok) { cfg = j; store.set('cfg', cfg); buildForm(); render(); $('retryCfg').hidden = true; if (cfgMsg && $('status').textContent === cfgMsg) { say('', ''); cfgMsg = ''; } }
-      else if (j) { configProblem({ kind: 'server', text: 'Google said: ' + (j.error || 'rejected') + '. Check the secret key in your link.' }); }
-      else { configProblem({ kind: 'server', text: 'Google sent a web page instead of data. In Apps Script use Deploy > Manage deployments > Edit > New version > Deploy, and make sure access is set to Anyone.' }); }
-    }).catch(function () {
-      if (navigator.onLine) configProblem({ kind: 'server', text: 'Could not reach your Google script. Check the link (it must end in /exec) and that access is set to Anyone.' });
-      else configProblem({ kind: 'network', text: 'Offline. Connect once to load your categories.' });
-    });
+  async function refresh() {
+    cfg = await Core.kvGet('cfg') || null;
+    queue = await Core.qAll();
+    render();
   }
 
-  function postEntry(e) {
-    var body = JSON.stringify(Object.assign({ key: conn.key }, e.payload));
-    return fetch(conn.api, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
-      .then(function (r) { return r.text(); })
-      .then(function (t) { try { return JSON.parse(t); } catch (x) { throw new Error('bad-response'); } });
+  // ---------- talking to Google ----------
+  function configProblem(text, isNetwork) {
+    // Stay quiet about a missing signal when we already have saved lists; always report real server problems.
+    if (!cfg || !isNetwork) { cfgMsg = text; say(text, 'err'); }
+    $('retryCfg').hidden = !!cfg;
+  }
+  async function loadConfig() {
+    if (!conn) return;
+    var r = await Core.fetchConfig(conn);
+    if (r.kind === 'ok') {
+      await Core.kvSet('cfg', r.cfg); cfg = r.cfg; buildForm(); render();
+      $('retryCfg').hidden = true;
+      if (cfgMsg && $('status').textContent === cfgMsg) { say('', ''); cfgMsg = ''; }
+    } else if (r.kind === 'server') {
+      configProblem(r.text, false);
+    } else if (navigator.onLine) {
+      configProblem('Could not reach your Google script. Check the link (it must end in /exec) and that access is set to Anyone.', false);
+    } else {
+      configProblem('Offline. Connect once to load your categories.', true);
+    }
   }
 
   function noteFor(res) {
+    if (!res) return '';
     if (res.fund) return 'Paid from your ' + esc(res.fund.name) + ' fund: ' + (res.fund.balance < 0 ? 'overdrawn by <b>' + money(res.fund.balance) + '</b>' : 'balance now <b>' + money(res.fund.balance) + '</b>');
     if (res.saving) return 'Savings / investment: not counted as spending.';
     if (res.fixed) return 'Fixed cost: not counted against your weekly allowance.';
     return '';
   }
 
-  function sync() {
-    if (syncing || !conn || !queue.length) { render(); return Promise.resolve(); }
-    syncing = true; var synced = false, problem = '';
-    function next() {
-      var e = queue.filter(function (x) { return !x.failed; })[0];
-      if (!e) return Promise.resolve();
-      return postEntry(e).then(function (res) {
-        if (res && res.ok) {
-          queue = queue.filter(function (x) { return x !== e; }); saveQueue(); synced = true;
-          if (res.budget && cfg) { cfg.budget = res.budget; store.set('cfg', cfg); }
-          lastNote = noteFor(res);
-          return next();
-        }
-        var msg = (res && res.error) || 'Rejected';
-        if (PERMANENT.test(msg)) { e.failed = true; e.error = msg; saveQueue(); return next(); }
-        problem = msg;                       // temporary server problem: keep the entry and try again later
-      });
-    }
-    return next().catch(function () { problem = navigator.onLine ? 'Cannot reach the server' : 'Offline'; })
-      .then(function () {
-        syncing = false;
-        var failed = queue.filter(function (e) { return e.failed; }).length;
-        var waiting = queue.length - failed;
-        if (failed) say(failed + ' entr' + (failed === 1 ? 'y needs' : 'ies need') + ' attention', 'err');
-        else if (waiting) say('Saved on this phone: ' + waiting + ' waiting to sync' + (problem && navigator.onLine ? ' (' + problem + ')' : ''), 'warn');
-        else if (synced) { say('Synced to your sheet \u2713', 'ok'); $('after').innerHTML = lastNote; }
-        render();
-      });
+  async function runSync() {
+    if (syncing || !conn) return;
+    syncing = true;
+    try {
+      var r = await Core.syncQueue();
+      await refresh();
+      if (r.failed) say(r.failed + ' entr' + (r.failed === 1 ? 'y needs' : 'ies need') + ' attention', 'err');
+      else if (r.waiting) say('Saved on this phone: ' + r.waiting + ' waiting to sync' + (r.problem && navigator.onLine ? ' (' + r.problem + ')' : ''), 'warn');
+      else if (r.synced) { say('Synced to your sheet \u2713', 'ok'); $('after').innerHTML = noteFor(r.lastRes); }
+    } catch (e) {
+      say('Sync problem: ' + (e && e.message || e), 'err');
+    } finally { syncing = false; }
+  }
+
+  // Ask Android Chrome to send waiting entries later, even if the app is closed by then.
+  async function registerBackgroundSync() {
+    try {
+      if (!('serviceWorker' in navigator)) return;
+      var reg = await navigator.serviceWorker.ready;
+      if (reg.sync) await reg.sync.register('sync-expenses');
+    } catch (e) { /* not supported: syncing on open / when back online still works */ }
   }
 
   // ---------- events ----------
   $('category').addEventListener('change', syncType);
 
-  $('save').addEventListener('click', function () {
+  $('save').addEventListener('click', async function () {
     var amount = parseFloat(($('amount').value || '').replace(/,/g, ''));
     if (!isFinite(amount) || amount <= 0) { say('Enter a valid amount', 'err'); $('amount').focus(); return; }
     if (!cfg) { say('Connect to the internet once to load your categories', 'err'); return; }
     var id = newId();
-    queue.push({ id: id, savedAt: Date.now(), payload: {
+    var entry = { id: id, savedAt: Date.now(), payload: {
       id: id, amount: amount, category: $('category').value, type: $('type').value, payment: $('payment').value,
-      remarks: $('remarks').value, device: $('device').value, person: conn.person,
+      remarks: $('remarks').value, device: conn.device || 'Android', person: conn.person,
       date: $('date').value || todayStr(), time: $('time').value || ''
-    } });
-    saveQueue();
+    } };
+    await Core.qPut(entry);
+    queue.push(entry);
     $('amount').value = ''; $('remarks').value = ''; setNow(); $('after').innerHTML = '';
     say('Saved on this phone \u2713', 'ok');
     render();
-    sync();
+    registerBackgroundSync();
+    runSync();
   });
 
+  $('syncBtn').addEventListener('click', async function () { say('Syncing...', ''); await runSync(); loadConfig(); });
   $('retryCfg').addEventListener('click', function () { say('Trying...', ''); loadConfig(); });
-  $('syncBtn').addEventListener('click', function () { say('Syncing...', ''); sync().then(function () { loadConfig(); }); });
 
-  $('qlist').addEventListener('click', function (ev) {
+  $('qlist').addEventListener('click', async function (ev) {
     var b = ev.target.closest('button'); if (!b) return;
     var id = b.getAttribute('data-id'), act = b.getAttribute('data-act');
-    if (act === 'del') { queue = queue.filter(function (e) { return e.id !== id; }); saveQueue(); render(); }
-    if (act === 'retry') { queue.forEach(function (e) { if (e.id === id) { e.failed = false; e.error = ''; } }); saveQueue(); render(); sync(); }
+    if (act === 'del') { await Core.qDel(id); await refresh(); }
+    if (act === 'retry') {
+      var e = queue.filter(function (x) { return x.id === id; })[0];
+      if (e) { e.failed = false; e.error = ''; await Core.qPut(e); await refresh(); registerBackgroundSync(); runSync(); }
+    }
   });
 
-  $('sSave').addEventListener('click', function () {
+  $('sSave').addEventListener('click', async function () {
     var api = $('sApi').value.trim(), key = $('sKey').value.trim();
     if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(api) || !key) { $('sMsg').textContent = 'Enter the full /exec URL and the secret key.'; return; }
-    conn = { api: api, key: key, person: $('sPerson').value.trim(), device: $('sDevice').value };
-    store.set('conn', conn); init();
+    conn = { api: api, key: key, person: $('sPerson').value.trim(), device: $('sDevice').value.trim() || 'Android' };
+    await Core.kvSet('conn', conn); start();
   });
 
-  $('resetLink').addEventListener('click', function () {
+  $('resetLink').addEventListener('click', async function () {
     var n = queue.length;
-    if (n && !confirm(n + ' entries have not reached your sheet yet and will be lost. Reset anyway?')) return;
-    if (!n && !confirm('Reset this app on this phone?')) return;
-    store.del('conn'); store.del('cfg'); store.del('queue');
-    conn = null; cfg = null; queue = []; render();
+    var msg = n ? n + ' entries have not reached your sheet yet and will be lost. Reset anyway?' : 'Reset this app on this phone?';
+    if (!confirm(msg)) return;
+    await Core.kvDel('conn'); await Core.kvDel('cfg'); await Core.qClear();
+    conn = null; cfg = null; queue = []; say('', ''); render();
   });
 
-  window.addEventListener('online', function () { render(); sync().then(loadConfig); });
-  window.addEventListener('offline', render);
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { render(); sync().then(loadConfig); } });
-  setInterval(function () { if (queue.some(function (e) { return !e.failed; })) sync(); }, 30000);
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installPrompt = e; $('installBtn').hidden = false; });
+  window.addEventListener('appinstalled', function () { $('installBtn').hidden = true; installPrompt = null; });
+  $('installBtn').addEventListener('click', function () { if (installPrompt) { installPrompt.prompt(); installPrompt = null; $('installBtn').hidden = true; } });
 
-  function init() {
-    render();
+  window.addEventListener('online', async function () { render(); await runSync(); loadConfig(); });
+  window.addEventListener('offline', render);
+  document.addEventListener('visibilitychange', async function () {
+    if (document.visibilityState !== 'visible') return;
+    await refresh(); await runSync(); loadConfig();
+  });
+  setInterval(function () { if (queue.some(function (e) { return !e.failed; })) runSync(); }, 30000);
+
+  async function start() {
+    await refresh();
     if (!conn) return;
     buildForm(); setNow();
-    loadConfig(); sync();
+    await loadConfig();
+    await runSync();
   }
 
-  loadState();
-  if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
-  init();
+  async function boot() {
+    conn = await Core.kvGet('conn') || null;
+    // A personal link carries the connection details: save them, then hide them from the address bar.
+    var p = new URLSearchParams(location.search);
+    if (p.get('api') && p.get('key')) {
+      conn = { api: p.get('api'), key: p.get('key'), person: p.get('person') || '', device: p.get('device') || 'Android' };
+      await Core.kvSet('conn', conn);
+      try { history.replaceState(null, '', location.pathname); } catch (e) {}
+    }
+    if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
+    await start();
+  }
+
+  boot();
   if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
 })();
 </script>
