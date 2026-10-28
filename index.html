@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#2563eb">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
-<title>Add Expense</title>
+<title>Expense Tracker</title>
 <style>
   :root {
     --bg: #eef2f7; --card: #ffffff; --text: #0f172a; --muted: #64748b;
@@ -21,342 +21,181 @@
     }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body {
-    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
-    font: 16px/1.4 Roboto, "Segoe UI", Arial, sans-serif;
-  }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 16px/1.4 Roboto, "Segoe UI", Arial, sans-serif; }
   .card { max-width: 440px; margin: 0 auto; background: var(--card); border-radius: 16px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
   .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   h1 { font-size: 20px; margin: 0; }
   .chip { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--ok); }
   .chip.off { color: var(--warn); }
   .who { margin: 2px 0 12px; color: var(--muted); font-size: 14px; }
-  .banner { margin: 0 0 4px; padding: 10px 12px; border-radius: 10px; font-size: 14px; background: var(--banner); border: 1px solid var(--bannerline); }
+  .banner { margin: 0 0 8px; padding: 10px 12px; border-radius: 10px; font-size: 14px; background: var(--banner); border: 1px solid var(--bannerline); }
   .banner b { white-space: nowrap; }
   .banner small { display: block; color: var(--muted); margin-top: 2px; }
   .neg { color: var(--err); }
   label { display: block; margin: 14px 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
-  input, select { width: 100%; padding: 12px; font-size: 16px; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 10px; }
-  input:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  input, select, textarea { width: 100%; padding: 12px; font: inherit; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 10px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
   input[readonly] { color: var(--muted); }
   .amount-wrap { position: relative; }
   .amount-wrap span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-weight: 600; }
   #amount { padding-left: 58px; font-size: 22px; font-weight: 600; }
+  .pin { text-align: center; font-size: 26px; letter-spacing: 8px; }
   .row { display: flex; gap: 10px; }
   .row > div { flex: 1; min-width: 0; }
   button { font: inherit; }
-  .primary { width: 100%; margin-top: 22px; padding: 14px; font-size: 17px; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 12px; }
+  .primary { width: 100%; margin-top: 18px; padding: 14px; font-size: 17px; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 12px; }
   .primary:disabled { opacity: .6; }
   .small { padding: 8px 12px; font-size: 14px; font-weight: 600; color: var(--accent); background: transparent; border: 1px solid var(--line); border-radius: 8px; }
-  #status { min-height: 22px; margin: 12px 0 0; text-align: center; font-weight: 600; }
-  #status.ok { color: var(--ok); } #status.err { color: var(--err); } #status.warn { color: var(--warn); }
+  .danger { color: var(--err); }
+  .tabs { display: flex; gap: 6px; margin: 0 0 14px; }
+  .tab { flex: 1; padding: 9px 4px; font-weight: 600; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 10px; }
+  .tab.on { color: #fff; background: var(--accent); border-color: transparent; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
+  .fav { padding: 6px 12px; font-size: 14px; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 999px; }
+  #status, #refStatus, #histNote { min-height: 22px; margin: 12px 0 0; text-align: center; font-weight: 600; }
+  .ok { color: var(--ok); } .err { color: var(--err); } .warn { color: var(--warn); }
   #after { margin: 6px 0 0; text-align: center; font-size: 14px; color: var(--muted); }
   #queueBox { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; }
-  #queueBox summary { cursor: pointer; font-weight: 600; }
+  summary { cursor: pointer; font-weight: 600; }
   .qrow { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .qrow:last-child { border-bottom: 0; }
-  .qrow .meta { color: var(--muted); font-size: 13px; }
-  .qrow .bad { color: var(--err); font-size: 13px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .bad { color: var(--err); font-size: 13px; }
   .qrow button { margin: 6px 6px 0 0; padding: 4px 10px; font-size: 13px; }
   .foot { margin: 18px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
-  .foot a { color: var(--muted); text-decoration: underline; cursor: pointer; margin: 0 8px; }
+  .foot a, .link { color: var(--muted); text-decoration: underline; cursor: pointer; margin: 0 8px; }
   .hint { font-size: 14px; color: var(--muted); }
+  #refStats small { display: block; color: var(--muted); }
 </style>
 </head>
 <body>
 <main class="card">
-  <div class="top"><h1>Add New Expense</h1><span id="net" class="chip">Online</span></div>
+  <div class="top"><h1>Expense Tracker</h1><span id="net" class="chip">Online</span></div>
   <p class="who" id="who"></p>
 
-  <!-- First-time setup (only shown if this phone has no saved link) -->
+  <!-- 1. First-time setup (only if this phone has no saved link) -->
   <section id="setup" hidden>
-    <p class="hint">Open the personal link for this phone, or fill these in once. Run <b>showLinks()</b> in Apps Script to see the values.</p>
+    <p class="hint">Open the personal link for this phone, or fill in these two things. Run <b>showLinks()</b> in Apps Script to see them.</p>
     <label for="sApi">Web app URL (ends in /exec)</label>
     <input id="sApi" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
-    <label for="sKey">Secret key</label>
-    <input id="sKey" type="text" autocomplete="off">
-    <div class="row">
-      <div><label for="sPerson">Your name</label><input id="sPerson" type="text" autocomplete="off"></div>
-      <div><label for="sDevice">Device name</label><input id="sDevice" type="text" value="Android" autocomplete="off"></div>
-    </div>
-    <button id="sSave" class="primary" type="button">Save setup</button>
+    <label for="sPerson">Your name (as written in the sheet)</label>
+    <input id="sPerson" type="text" autocomplete="off">
+    <button id="sSave" class="primary" type="button">Continue</button>
     <p id="sMsg" class="hint"></p>
   </section>
 
-  <section id="app" hidden>
-    <p class="banner" id="banner" hidden></p>
+  <!-- 2. Sign in with an emailed code -->
+  <section id="activate" hidden>
+    <p class="hint">To keep the family sheet private, each phone signs in once with a 6-digit code sent to the email address saved for you in the sheet.</p>
+    <button id="otpSend" class="primary" type="button">Email me a code</button>
+    <div id="otpBox" hidden>
+      <label for="otpCode">6-digit code</label>
+      <input id="otpCode" class="pin" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+      <button id="otpVerify" class="primary" type="button">Verify</button>
+      <p style="text-align:center;margin:10px 0 0"><button id="otpResend" class="small" type="button" disabled>Send again</button></p>
+    </div>
+    <p id="otpMsg" class="hint"></p>
+    <p class="foot"><a id="actCancel" hidden>Cancel</a><a id="actChange">Use a different name</a></p>
+  </section>
 
-    <label for="amount">Amount (<span id="cur">PKR</span>) *</label>
-    <div class="amount-wrap"><span id="curTag">PKR</span><input id="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
+  <!-- 3. Create a PIN -->
+  <section id="pinSet" hidden>
+    <p class="hint">Choose a PIN of 4 to 6 digits. You will enter it whenever you open the app.</p>
+    <label for="pin1">New PIN</label>
+    <input id="pin1" class="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
+    <label for="pin2">Repeat PIN</label>
+    <input id="pin2" class="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
+    <button id="pinSave" class="primary" type="button">Save PIN</button>
+    <p id="pinSetMsg" class="hint"></p>
+  </section>
 
-    <label for="category">Category *</label>
-    <select id="category"></select>
+  <!-- 4. Locked -->
+  <section id="lock" hidden>
+    <label for="pinIn">Enter your PIN</label>
+    <input id="pinIn" class="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
+    <button id="pinGo" class="primary" type="button">Unlock</button>
+    <p id="pinMsg" class="hint"></p>
+    <p class="foot"><a id="forgotPin">Forgot PIN?</a></p>
+  </section>
 
-    <div class="row">
-      <div><label for="type">Kakeibo type</label><select id="type"></select></div>
-      <div><label for="payment">Payment mode</label><select id="payment"></select></div>
+  <!-- 5. The app -->
+  <section id="main" hidden>
+    <nav class="tabs">
+      <button class="tab on" type="button" data-tab="add">Add</button>
+      <button class="tab" type="button" data-tab="history">History</button>
+      <button class="tab" type="button" data-tab="reflect">Reflect</button>
+    </nav>
+
+    <div id="tabAdd">
+      <p class="banner" id="banner" hidden></p>
+      <div class="banner" id="editBar" hidden>
+        <span id="editText"></span><br>
+        <button id="editCancel" class="small" type="button" style="margin-top:6px">Cancel</button>
+        <button id="editDelete" class="small danger" type="button" style="margin-top:6px">Delete entry</button>
+      </div>
+      <div id="favs" class="chips" hidden></div>
+
+      <label for="amount">Amount (<span id="cur">PKR</span>) *</label>
+      <div class="amount-wrap"><span id="curTag">PKR</span><input id="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
+
+      <label for="category">Category *</label>
+      <select id="category"></select>
+
+      <div class="row">
+        <div><label for="type">Kakeibo type</label><select id="type"></select></div>
+        <div><label for="payment">Payment mode</label><select id="payment"></select></div>
+      </div>
+
+      <div class="row">
+        <div><label for="date">Date</label><input id="date" type="date"></div>
+        <div><label for="time">Time</label><input id="time" type="time"></div>
+      </div>
+
+      <label for="remarks">Remarks / purpose</label>
+      <input id="remarks" type="text" maxlength="200" placeholder="e.g. Monthly groceries, lunch, cab" autocomplete="off">
+
+      <label for="device">Device logged</label>
+      <input id="device" type="text" readonly>
+
+      <button id="save" class="primary" type="button">Save Record</button>
+      <p style="text-align:center;margin:10px 0 0"><button id="favSave" class="small" type="button">&#9734; Save as favourite</button></p>
+      <p id="status" role="status"></p>
+      <p style="text-align:center;margin:6px 0 0"><button id="retryCfg" class="small" type="button" hidden>Try again</button></p>
+      <p id="after"></p>
     </div>
 
-    <div class="row">
-      <div><label for="date">Date</label><input id="date" type="date"></div>
-      <div><label for="time">Time</label><input id="time" type="time"></div>
+    <div id="tabHistory" hidden>
+      <p class="hint">Your latest entries. Tap Edit to change one, or Delete to remove it.</p>
+      <button id="histRefresh" class="small" type="button">Refresh</button>
+      <p id="histNote"></p>
+      <div id="histList"></div>
     </div>
 
-    <label for="remarks">Remarks / purpose</label>
-    <input id="remarks" type="text" maxlength="200" placeholder="e.g. Monthly groceries, lunch, cab" autocomplete="off">
-
-    <label for="device">Device logged</label>
-    <input id="device" type="text" readonly>
-
-    <button id="save" class="primary" type="button">Save Record</button>
-    <p id="status" role="status"></p>
-    <p style="text-align:center;margin:6px 0 0"><button id="retryCfg" class="small" type="button" hidden>Try again</button></p>
-    <p id="after"></p>
+    <div id="tabReflect" hidden>
+      <p class="hint">Kakeibo is about looking back. Take two minutes.</p>
+      <label for="refPeriod">Period</label>
+      <select id="refPeriod">
+        <option value="week0">This week</option><option value="week1">Last week</option>
+        <option value="month0">This month</option><option value="month1">Last month</option>
+      </select>
+      <div class="banner" id="refStats" style="margin-top:12px">Loading your numbers...</div>
+      <label id="q1l" for="q1"></label><textarea id="q1" rows="3" maxlength="1500"></textarea>
+      <label id="q2l" for="q2"></label><textarea id="q2" rows="3" maxlength="1500"></textarea>
+      <label id="q3l" for="q3"></label><textarea id="q3" rows="3" maxlength="1500"></textarea>
+      <button id="refSave" class="primary" type="button">Save reflection</button>
+      <p id="refStatus"></p>
+    </div>
 
     <div id="queueBox" hidden>
       <details id="qd"><summary id="qsum"></summary><div id="qlist"></div></details>
       <button id="syncBtn" class="small" type="button" style="margin-top:10px">Sync now</button>
     </div>
+    <details id="favManage" style="margin-top:14px" hidden><summary>Manage favourites</summary><div id="favList"></div></details>
   </section>
 
-  <p class="foot"><a id="installBtn" hidden>Install app</a><a id="resetLink">Reset this app</a></p>
+  <p class="foot"><a id="installBtn" hidden>Install app</a><a id="lockNow" hidden>Lock now</a><a id="resetLink">Reset this app</a></p>
 </main>
-
 <script src="core.js"></script>
-<script>
-(function () {
-  'use strict';
-  var $ = function (id) { return document.getElementById(id); };
-  var pad = function (n) { return (n < 10 ? '0' : '') + n; };
-
-  var conn = null;     // { api, key, person, device }
-  var cfg = null;      // last lists + budget from Google (kept for offline use)
-  var queue = [];      // entries saved on this phone and not yet in the sheet
-  var syncing = false, cfgMsg = '', installPrompt = null;
-
-  function newId() {
-    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-    return Date.now() + '-' + Math.random().toString(36).slice(2, 10);
-  }
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
-  function todayStr() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
-  function setNow() { var d = new Date(); $('date').value = todayStr(); $('time').value = pad(d.getHours()) + ':' + pad(d.getMinutes()); }
-  function cur() { return (cfg && cfg.currency) || 'PKR'; }
-  function money(n) { return cur() + ' ' + Math.abs(Math.round(n)).toLocaleString(); }
-  function say(msg, kind) { $('status').textContent = msg; $('status').className = kind || ''; }
-
-  // ---------- budget banner: last known figures minus entries not yet synced (works offline) ----------
-  function weekOf(dateStr) { return Math.floor((parseInt(dateStr.slice(8, 10), 10) - 1) / 7) + 1; }
-  function estimate() {
-    var b = cfg && cfg.budget;
-    if (!b || !b.hasPlan) return null;
-    var wl = b.weekLeft, ml = b.monthLeft, pending = 0;
-    queue.forEach(function (e) {
-      if (e.failed) return;
-      pending++;
-      var p = e.payload;
-      if (p.type === 'Savings' || (cfg.fixed || []).indexOf(p.category) !== -1) return;
-      if (String(p.date).slice(0, 7) === b.ym) { ml -= p.amount; if (weekOf(p.date) === b.week) wl -= p.amount; }
-    });
-    return { week: b.week, weekLeft: wl, monthLeft: ml, pending: pending };
-  }
-  function leftHtml(n) { return n < 0 ? '<b class="neg">over by ' + money(n) + '</b>' : '<b>' + money(n) + '</b> left'; }
-  function renderBanner() {
-    var est = estimate(), box = $('banner');
-    if (!est) { box.hidden = true; return; }
-    var html = 'Week ' + est.week + ': ' + leftHtml(est.weekLeft) + ' &middot; Month: ' + leftHtml(est.monthLeft);
-    if (est.pending) html += '<small>Estimate: ' + est.pending + ' entr' + (est.pending === 1 ? 'y' : 'ies') + ' not synced yet</small>';
-    else if (!navigator.onLine) html += '<small>Offline: last known figures</small>';
-    box.innerHTML = html; box.hidden = false;
-  }
-
-  // ---------- form ----------
-  function fill(sel, items) {
-    var keep = sel.value; sel.innerHTML = '';
-    (items || []).forEach(function (t) { var o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o); });
-    if (keep && (items || []).indexOf(keep) >= 0) sel.value = keep;
-  }
-  function syncType() { if (cfg && cfg.types) $('type').value = cfg.types[$('category').value] || 'Extra'; }
-  function buildForm() {
-    if (!cfg) return;
-    $('cur').textContent = cur(); $('curTag').textContent = cur();
-    fill($('category'), cfg.categories); fill($('type'), cfg.kakeiboTypes); fill($('payment'), cfg.payments);
-    syncType();
-  }
-
-  // ---------- waiting entries ----------
-  function renderQueue() {
-    var box = $('queueBox');
-    if (!queue.length) { box.hidden = true; return; }
-    box.hidden = false;
-    var failed = queue.filter(function (e) { return e.failed; }).length;
-    $('qsum').textContent = (queue.length - failed) + ' waiting to sync' + (failed ? ', ' + failed + ' need attention' : '');
-    $('qlist').innerHTML = queue.map(function (e) {
-      var p = e.payload;
-      return '<div class="qrow"><div><b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.category) + '</div>' +
-        '<div class="meta">' + esc(p.date) + ' ' + esc(p.time) + (p.remarks ? ' &middot; ' + esc(p.remarks) : '') + '</div>' +
-        (e.failed ? '<div class="bad">Not saved: ' + esc(e.error) + '</div><button class="small" data-act="retry" data-id="' + esc(e.id) + '">Retry</button>'
-                  : '<div class="meta">Waiting to sync</div>') +
-        '<button class="small" data-act="del" data-id="' + esc(e.id) + '">Delete</button></div>';
-    }).join('');
-  }
-
-  function render() {
-    var net = $('net');
-    net.textContent = navigator.onLine ? 'Online' : 'Offline';
-    net.className = 'chip' + (navigator.onLine ? '' : ' off');
-    $('setup').hidden = !!conn; $('app').hidden = !conn;
-    $('who').textContent = conn ? (conn.person ? 'Logging as ' + conn.person : 'No name set in this link') : 'First-time setup';
-    if (!conn) return;
-    $('device').value = conn.device || 'Android';
-    renderBanner(); renderQueue();
-  }
-
-  async function refresh() {
-    cfg = await Core.kvGet('cfg') || null;
-    queue = await Core.qAll();
-    render();
-  }
-
-  // ---------- talking to Google ----------
-  function configProblem(text, isNetwork) {
-    // Stay quiet about a missing signal when we already have saved lists; always report real server problems.
-    if (!cfg || !isNetwork) { cfgMsg = text; say(text, 'err'); }
-    $('retryCfg').hidden = !!cfg;
-  }
-  async function loadConfig() {
-    if (!conn) return;
-    var r = await Core.fetchConfig(conn);
-    if (r.kind === 'ok') {
-      await Core.kvSet('cfg', r.cfg); cfg = r.cfg; buildForm(); render();
-      $('retryCfg').hidden = true;
-      if (cfgMsg && $('status').textContent === cfgMsg) { say('', ''); cfgMsg = ''; }
-    } else if (r.kind === 'server') {
-      configProblem(r.text, false);
-    } else if (navigator.onLine) {
-      configProblem('Could not reach your Google script. Check the link (it must end in /exec) and that access is set to Anyone.', false);
-    } else {
-      configProblem('Offline. Connect once to load your categories.', true);
-    }
-  }
-
-  function noteFor(res) {
-    if (!res) return '';
-    if (res.fund) return 'Paid from your ' + esc(res.fund.name) + ' fund: ' + (res.fund.balance < 0 ? 'overdrawn by <b>' + money(res.fund.balance) + '</b>' : 'balance now <b>' + money(res.fund.balance) + '</b>');
-    if (res.saving) return 'Savings / investment: not counted as spending.';
-    if (res.fixed) return 'Fixed cost: not counted against your weekly allowance.';
-    return '';
-  }
-
-  async function runSync() {
-    if (syncing || !conn) return;
-    syncing = true;
-    try {
-      var r = await Core.syncQueue();
-      await refresh();
-      if (r.failed) say(r.failed + ' entr' + (r.failed === 1 ? 'y needs' : 'ies need') + ' attention', 'err');
-      else if (r.waiting) say('Saved on this phone: ' + r.waiting + ' waiting to sync' + (r.problem && navigator.onLine ? ' (' + r.problem + ')' : ''), 'warn');
-      else if (r.synced) { say('Synced to your sheet \u2713', 'ok'); $('after').innerHTML = noteFor(r.lastRes); }
-    } catch (e) {
-      say('Sync problem: ' + (e && e.message || e), 'err');
-    } finally { syncing = false; }
-  }
-
-  // Ask Android Chrome to send waiting entries later, even if the app is closed by then.
-  async function registerBackgroundSync() {
-    try {
-      if (!('serviceWorker' in navigator)) return;
-      var reg = await navigator.serviceWorker.ready;
-      if (reg.sync) await reg.sync.register('sync-expenses');
-    } catch (e) { /* not supported: syncing on open / when back online still works */ }
-  }
-
-  // ---------- events ----------
-  $('category').addEventListener('change', syncType);
-
-  $('save').addEventListener('click', async function () {
-    var amount = parseFloat(($('amount').value || '').replace(/,/g, ''));
-    if (!isFinite(amount) || amount <= 0) { say('Enter a valid amount', 'err'); $('amount').focus(); return; }
-    if (!cfg) { say('Connect to the internet once to load your categories', 'err'); return; }
-    var id = newId();
-    var entry = { id: id, savedAt: Date.now(), payload: {
-      id: id, amount: amount, category: $('category').value, type: $('type').value, payment: $('payment').value,
-      remarks: $('remarks').value, device: conn.device || 'Android', person: conn.person,
-      date: $('date').value || todayStr(), time: $('time').value || ''
-    } };
-    await Core.qPut(entry);
-    queue.push(entry);
-    $('amount').value = ''; $('remarks').value = ''; setNow(); $('after').innerHTML = '';
-    say('Saved on this phone \u2713', 'ok');
-    render();
-    registerBackgroundSync();
-    runSync();
-  });
-
-  $('syncBtn').addEventListener('click', async function () { say('Syncing...', ''); await runSync(); loadConfig(); });
-  $('retryCfg').addEventListener('click', function () { say('Trying...', ''); loadConfig(); });
-
-  $('qlist').addEventListener('click', async function (ev) {
-    var b = ev.target.closest('button'); if (!b) return;
-    var id = b.getAttribute('data-id'), act = b.getAttribute('data-act');
-    if (act === 'del') { await Core.qDel(id); await refresh(); }
-    if (act === 'retry') {
-      var e = queue.filter(function (x) { return x.id === id; })[0];
-      if (e) { e.failed = false; e.error = ''; await Core.qPut(e); await refresh(); registerBackgroundSync(); runSync(); }
-    }
-  });
-
-  $('sSave').addEventListener('click', async function () {
-    var api = $('sApi').value.trim(), key = $('sKey').value.trim();
-    if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(api) || !key) { $('sMsg').textContent = 'Enter the full /exec URL and the secret key.'; return; }
-    conn = { api: api, key: key, person: $('sPerson').value.trim(), device: $('sDevice').value.trim() || 'Android' };
-    await Core.kvSet('conn', conn); start();
-  });
-
-  $('resetLink').addEventListener('click', async function () {
-    var n = queue.length;
-    var msg = n ? n + ' entries have not reached your sheet yet and will be lost. Reset anyway?' : 'Reset this app on this phone?';
-    if (!confirm(msg)) return;
-    await Core.kvDel('conn'); await Core.kvDel('cfg'); await Core.qClear();
-    conn = null; cfg = null; queue = []; say('', ''); render();
-  });
-
-  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installPrompt = e; $('installBtn').hidden = false; });
-  window.addEventListener('appinstalled', function () { $('installBtn').hidden = true; installPrompt = null; });
-  $('installBtn').addEventListener('click', function () { if (installPrompt) { installPrompt.prompt(); installPrompt = null; $('installBtn').hidden = true; } });
-
-  window.addEventListener('online', async function () { render(); await runSync(); loadConfig(); });
-  window.addEventListener('offline', render);
-  document.addEventListener('visibilitychange', async function () {
-    if (document.visibilityState !== 'visible') return;
-    await refresh(); await runSync(); loadConfig();
-  });
-  setInterval(function () { if (queue.some(function (e) { return !e.failed; })) runSync(); }, 30000);
-
-  async function start() {
-    await refresh();
-    if (!conn) return;
-    buildForm(); setNow();
-    await loadConfig();
-    await runSync();
-  }
-
-  async function boot() {
-    conn = await Core.kvGet('conn') || null;
-    // A personal link carries the connection details: save them, then hide them from the address bar.
-    var p = new URLSearchParams(location.search);
-    if (p.get('api') && p.get('key')) {
-      conn = { api: p.get('api'), key: p.get('key'), person: p.get('person') || '', device: p.get('device') || 'Android' };
-      await Core.kvSet('conn', conn);
-      try { history.replaceState(null, '', location.pathname); } catch (e) {}
-    }
-    if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
-    await start();
-  }
-
-  boot();
-  if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
-})();
-</script>
+<script src="app.js"></script>
 </body>
 </html>
