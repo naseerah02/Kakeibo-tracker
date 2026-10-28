@@ -2,8 +2,8 @@
    Bump CACHE whenever you change any app file so phones pick up the new version. */
 importScripts('core.js');
 
-const CACHE = 'expense-app-v3';
-const SHELL = ['./', './index.html', './core.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'expense-app-v4';
+const SHELL = ['./', './index.html', './core.js', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
@@ -53,5 +53,5 @@ self.addEventListener('fetch', function (e) {
 // Android Chrome wakes this up when the connection returns, even if the app is closed.
 self.addEventListener('sync', function (e) {
   if (e.tag !== 'sync-expenses') return;
-  e.waitUntil(Core.syncQueue().then(function (r) { if (r.retry) throw new Error('retry later'); }));   // throwing asks Chrome to try again
+  e.waitUntil(Core.syncQueue().then(function (r) { if (r.retry) throw new Error('retry later'); }));   // throwing asks Chrome to try again (not when the phone must sign in again: that needs the app)
 });
