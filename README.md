@@ -1,4 +1,4 @@
-# Kakeibo Family Expense Tracker (Android, v2)
+# Kakeibo Family Expense Tracker (Android, v2.1)
 
 A private family expense tracker built on a Google Sheet and an installable Android app. Log an expense in a few taps, even with no internet. Each phone signs in with an emailed code and a PIN, and everything lands in one shared sheet with a dashboard based on the Japanese **Kakeibo** budgeting method.
 
@@ -40,6 +40,9 @@ A private family expense tracker built on a Google Sheet and an installable Andr
 |---|---|
 | **Entry** | Amount, category, Kakeibo type, payment mode, date, time, remarks. The app remembers your last category and payment mode, and you can save **favourites** (for example "Tea, 50") as one-tap chips. |
 | **History** | See your latest entries and **edit or delete** them from the app. |
+| **Budget warnings** | The budget banner turns amber when you have used 80% of the week's or month's allowance (you choose the level) and red when you are over. Under the amount, a preview shows what the purchase would do before you save it. |
+| **Month** | A month summary inside the app: key figures, Kakeibo split, categories, weeks, days and fund balances. |
+| **Shortcuts** | Long-press the app icon for Add expense, Pay Zakat, History and Month summary. |
 | **Offline** | Entries are queued on the phone and sent later, also in the background when Android allows. |
 | **Sign-in** | Email code (OTP) once per phone, then a PIN each time the app opens. Phones can be revoked. |
 | **Kakeibo** | Needs, Wants, Culture, Extra and Savings. A monthly household **Plan** gives a weekly allowance and a budget banner. |
@@ -101,7 +104,7 @@ README.md                  This file
 | Tab | Purpose |
 |---|---|
 | `Expenses` | One row per expense: Date, Month, Time, Category, Amount, Payment Mode, Remarks, Device Name, Person, ID, Kakeibo Type |
-| `Settings` | Summary email (B2), currency (B3), categories with Kakeibo type and fixed flag, people with emails, payment modes, fund links |
+| `Settings` | Summary email (B2), currency (B3), budget warning level (B4), categories with Kakeibo type and fixed flag, people with emails, payment modes, fund links |
 | `Plan` | One row per month: income, planned fixed costs, savings goal, Zakat and Qurbani set-asides |
 | `Funds` | Monthly Zakat and Qurbani ledger |
 | `Recurring` | Expenses added automatically every month |
@@ -134,6 +137,7 @@ Allow about 40 minutes the first time.
    - Column **I**: enter each person's **email address**. A person without an email cannot sign in.
    - **B2**: the email address(es) that receive the weekly and monthly summaries (several can be separated by commas).
    - **B3**: the currency label (default `PKR`).
+   - **B4**: the budget warning level, as a percentage of the allowance used (default `80`, allowed 50 to 99).
    - Columns D to F: review the categories, their Kakeibo type and the fixed-cost flag.
 2. **Plan tab** (yellow cells): this month's **Income**, **Fixed costs (planned)**, **Savings goal**, and the **Zakat** and **Qurbani** set-asides. Plain numbers only.
 3. **Funds tab** (optional): opening balances in **B2** and **C2**.
@@ -194,9 +198,18 @@ The repository holds only code. It has no keys and no data.
 
 ---
 
+### From version 2 to 2.1
+
+1. Paste the new `Code.gs`, save, and run **setup** (safe to re-run). It adds the warning level to `Settings!B4`.
+2. **Deploy > Manage deployments > pencil > New version > Deploy.**
+3. Upload the changed app files to GitHub, replacing the old ones: `index.html`, `app.js`, `core.js`, `sw.js` and `manifest.webmanifest`.
+4. Open the app online on each phone. The warnings and the Month tab appear after the app updates. The new shortcuts follow when Android refreshes the installed app, or after you reinstall it.
+
+---
+
 ## Daily use
 
-The app has three tabs: **Add**, **History** and **Reflect**.
+The app has four tabs: **Add**, **History**, **Month** and **Reflect**.
 
 ### Add
 
@@ -217,6 +230,50 @@ The **History** tab lists your latest entries (up to 40), including ones still w
 - Changing or deleting an entry that is **already in the sheet needs internet**. Entries still waiting on the phone can be edited or deleted offline.
 - You can only change your own entries. Every edit and delete is recorded in the `Audit` tab.
 - Rows without an ID (typed into the sheet by hand, or saved before version 2) do not appear. Correct those in the sheet.
+
+### Budget warnings
+
+The banner at the top of the Add tab shows the week and month remaining. It changes colour so you notice without reading numbers:
+
+| Colour | Meaning |
+|---|---|
+| Normal | Less than your warning level of the allowance is used (80% unless you changed `Settings!B4`) |
+| **Amber** | The warning level is reached, for example "83% of this week's allowance used" |
+| **Red** | You are over the allowance, for example "Over this week's allowance" |
+
+The week and the month are checked separately, so you may see a warning for one and not the other.
+
+- **Before you save:** as soon as you type an amount, a line under it says "After this: week PKR 6,000 left, month PKR 34,000 left". It turns amber or red if saving would reach the warning level or go over. It does not appear for fixed costs or Savings entries, because those do not count against the allowance.
+- **After you save:** the same warning is repeated under the button.
+- **Offline:** the figures are estimates built from the last known budget minus entries not yet synced, and the banner says so.
+- The preview is a nudge, not a block: you can still save.
+
+### Month
+
+The **Month** tab is a summary of the whole month without opening the sheet. Choose **This month**, **Last month** or **2 months ago**:
+
+- **Key figures:** spent, allowance and what is left (or by how much you are over), a meter showing the percentage of the allowance used, the average per day, and how this month compares with the one before.
+- **Kakeibo split:** Needs, Wants, Culture and Extra as a bar, with amounts and percentages.
+- **By category:** your biggest categories.
+- **By week:** spending for each week block against its allowance (the dashed outline). A bar turns red when the week went over.
+- **By day:** a small chart of daily spending, with today highlighted.
+- **Funds:** the Zakat and Qurbani balances (red if overdrawn).
+- Fixed costs paid and savings or funds paid are shown as separate lines, because they do not count against the allowance.
+
+The numbers are kept on the phone, so a month you have already opened still shows offline, marked "Last loaded numbers".
+
+### Home-screen shortcuts
+
+After installing, touch and hold the app icon on the home screen to see up to four shortcuts:
+
+| Shortcut | Opens |
+|---|---|
+| **Add expense** | The Add tab |
+| **Pay Zakat** | The Add tab with the Zakat category already chosen |
+| **History** | Your latest entries |
+| **Month summary** | The Month tab |
+
+The app still asks for the PIN first, then goes straight to the screen you picked. Android shows at most four shortcuts. The Reflect tab opens from the link in the weekly summary email, and `#qurbani` works the same way as Zakat if you add a link to it yourself. A shortcut can take up to a day to appear after an update, because Android refreshes an installed app's shortcuts on its own schedule. Reinstalling the app makes it immediate.
 
 ### Status messages
 
@@ -414,6 +471,8 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 | Summary email | `Settings!B2` |
 | Payment modes | `Settings` column J (the dashboard shows the first 8) |
 | Currency label | `Settings!B3`, then run `buildDashboard()` |
+| Budget warning level | `Settings!B4` (percentage of the allowance used, 50 to 99, default 80) |
+| Home-screen shortcuts | `shortcuts` in `manifest.webmanifest` (Android shows at most four) |
 | Funds | `Settings` columns L:M link a fund name to its category |
 | Plan months | Add rows to `Plan` (up to 36 months) |
 | When emails and recurring run | Edit the hours in `installTriggers()` and run it again |
@@ -425,7 +484,7 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 
 **Backend (`Code.gs`):** paste the new code, save, then **Deploy > Manage deployments > pencil > New version > Deploy**. If the dashboard changed, run `buildDashboard()`. If new tabs or columns were added, run `setup()` again (safe to re-run).
 
-**App files (GitHub):** upload the changed files to your repository (**Add file > Upload files**), replacing the old ones. If you changed any app file, also raise the version in `sw.js` (`expense-app-v4` becomes `v5`) so phones fetch the new copy. Each phone updates the next time you open the app with internet. Close and reopen the app once more if the old version still shows.
+**App files (GitHub):** upload the changed files to your repository (**Add file > Upload files**), replacing the old ones. If you changed any app file, also raise the version in `sw.js` (`expense-app-v5` becomes `v6`) so phones fetch the new copy. Each phone updates the next time you open the app with internet. Close and reopen the app once more if the old version still shows.
 
 ---
 
@@ -445,6 +504,9 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 | **"Not saved: Invalid amount / date / time"** | The entry was rejected. Delete it from the waiting list and enter it again. |
 | **"Connect to the internet to change saved entries"** | Editing or deleting an entry already in the sheet needs a connection. |
 | **"Not your entry"** | You can only change your own entries. |
+| No amber or red warning | The `Plan` tab needs income for the month, since the allowance comes from it. The warning level is `Settings!B4`. |
+| The Month tab says "Connect to the internet" | That month has not been opened online yet. Open it once with internet and it is kept. |
+| The long-press shortcuts are missing or old | Android refreshes them on its own schedule (up to a day). Reinstalling the app updates them at once. Only four are shown. |
 | An entry is missing from History | Only your own entries with an ID appear, and only the latest 40. |
 | No budget banner | The `Plan` tab has no income for the current month. |
 | Recurring expense was not added | `Active` must be `Yes`, the start month must have begun, and `installTriggers` must have been run. Check the day of month. |
@@ -492,12 +554,12 @@ For developers. Everything except the health check is a `POST` to the `/exec` ad
 |---|---|---|---|
 | `otp_request` | no | `person` | `{"ok":true}` (the same reply whether or not the person exists) |
 | `otp_verify` | no | `person`, `code`, `deviceId`, `label` | `{"ok":true,"token":"...","person":"Ali"}` |
-| `config` | yes | none | currency, categories, types, fixed list, payments, `lockSeconds`, `budget` |
+| `config` | yes | none | currency, categories, types, fixed list, payments, `funds`, `warnAt`, `lockSeconds`, `budget` (including `weekAllowance`) |
 | `save` (default) | yes | `amount`, `category`, `type`, `payment`, `remarks`, `device`, `date`, `time`, `id` | `{"ok":true,"type":...,"fixed":...,"saving":...,"fund":...,"budget":{...}}` |
 | `recent` | yes | none | `{"ok":true,"entries":[...]}` (own entries) |
 | `update` | yes | `id` plus the `save` fields | `{"ok":true,"budget":{...}}` |
 | `delete` | yes | `id` | `{"ok":true,"budget":{...}}` |
-| `summary` | yes | `period` (`week` or `month`), `date` | `{"ok":true,"stats":{...},"prev":{...}}` |
+| `summary` | yes | `period` (`week` or `month`), `date`, optional `detail: true` | `{"ok":true,"stats":{...},"prev":{...}}`. With `detail`, `stats` also has `byCategory`, `daily` and (for months) `weeks`, and the reply includes fund balances in `funds`. |
 | `reflect` | yes | `kind` (`Weekly`/`Monthly`), `date`, `q1`, `q2`, `q3`, `id` | `{"ok":true}` |
 
 - `date` accepts `YYYY-MM-DD` or `DD/MM/YYYY`; `time` is `HH:mm`. Both default to now.
@@ -521,6 +583,9 @@ After installing, check each of these once:
 - [ ] History: edit an entry's amount, then delete a test entry. Both show in the sheet, and in the `Audit` tab
 - [ ] The budget banner shows figures (after filling in the `Plan`)
 - [ ] A favourite saves and fills the form when tapped
+- [ ] Budget warnings: with the week close to its allowance the banner turns amber, and a large amount shows an amber or red line under the amount field
+- [ ] The Month tab shows figures, the Kakeibo split and charts, and still shows a month you opened before when you go offline
+- [ ] Touch and hold the app icon: the Pay Zakat shortcut opens the form with the Zakat category chosen
 - [ ] A Zakat or Qurbani payment shows the fund balance and does not change the weekly figure
 - [ ] Reflect shows numbers and a saved reflection appears on the `Reflections` tab
 - [ ] A Recurring row set to Active: run `runRecurring` once and the entry appears

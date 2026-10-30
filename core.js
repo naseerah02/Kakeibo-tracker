@@ -37,6 +37,7 @@
     kvGet: function (k) { return run('kv', 'readonly', function (s) { return s.get(k); }); },
     kvSet: function (k, v) { return run('kv', 'readwrite', function (s) { return s.put(v, k); }); },
     kvDel: function (k) { return run('kv', 'readwrite', function (s) { return s.delete(k); }); },
+    kvKeys: function () { return run('kv', 'readonly', function (s) { return s.getAllKeys(); }).then(function (k) { return k || []; }); },
     qAll: function () {
       return run('queue', 'readonly', function (s) { return s.getAll(); })
         .then(function (a) { return (a || []).sort(function (x, y) { return x.savedAt - y.savedAt; }); });

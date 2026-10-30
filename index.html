@@ -66,6 +66,30 @@
   .foot a, .link { color: var(--muted); text-decoration: underline; cursor: pointer; margin: 0 8px; }
   .hint { font-size: 14px; color: var(--muted); }
   #refStats small { display: block; color: var(--muted); }
+  .banner.warn { background: #fff7e6; border-color: #f5c16c; }
+  .banner.over { background: #fdeceb; border-color: #f1a9a4; }
+  @media (prefers-color-scheme: dark) {
+    .banner.warn { background: #3a2c10; border-color: #7a5a1a; }
+    .banner.over { background: #3a1717; border-color: #7a2b2b; }
+  }
+  .alertline { display: block; margin-top: 4px; font-weight: 600; }
+  .alertline.warn { color: var(--warn); } .alertline.over { color: var(--err); }
+  #preview { margin: 6px 2px 0; font-size: 13px; }
+  .kpis { display: flex; gap: 8px; margin: 6px 0 8px; }
+  .kpis > div { flex: 1; padding: 8px 4px; border: 1px solid var(--line); border-radius: 10px; text-align: center; min-width: 0; }
+  .kpis small { display: block; color: var(--muted); font-size: 12px; }
+  .kpis b { font-size: 14px; }
+  h3.sec { font-size: 14px; margin: 18px 0 6px; }
+  .stack { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: var(--field); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 13px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
+  .bar { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 13px; }
+  .bar .lab { width: 36%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .track { flex: 1; height: 12px; background: var(--field); border-radius: 6px; overflow: hidden; }
+  .bar .fill { height: 100%; background: var(--accent); }
+  .bar .val { min-width: 78px; text-align: right; color: var(--muted); }
+  svg.chart { width: 100%; height: auto; display: block; }
+  svg.chart text { fill: var(--muted); font-size: 8px; }
 </style>
 </head>
 <body>
@@ -123,6 +147,7 @@
     <nav class="tabs">
       <button class="tab on" type="button" data-tab="add">Add</button>
       <button class="tab" type="button" data-tab="history">History</button>
+      <button class="tab" type="button" data-tab="month">Month</button>
       <button class="tab" type="button" data-tab="reflect">Reflect</button>
     </nav>
 
@@ -137,6 +162,7 @@
 
       <label for="amount">Amount (<span id="cur">PKR</span>) *</label>
       <div class="amount-wrap"><span id="curTag">PKR</span><input id="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
+      <p id="preview" hidden></p>
 
       <label for="category">Category *</label>
       <select id="category"></select>
@@ -169,6 +195,12 @@
       <button id="histRefresh" class="small" type="button">Refresh</button>
       <p id="histNote"></p>
       <div id="histList"></div>
+    </div>
+
+    <div id="tabMonth" hidden>
+      <label for="monPeriod">Month</label>
+      <select id="monPeriod"><option value="0">This month</option><option value="1">Last month</option><option value="2">2 months ago</option></select>
+      <div id="monBody" style="margin-top:12px"><p class="hint">Loading your numbers...</p></div>
     </div>
 
     <div id="tabReflect" hidden>
