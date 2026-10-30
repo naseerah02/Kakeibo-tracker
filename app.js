@@ -60,20 +60,21 @@
     n.className = 'chip' + (navigator.onLine ? '' : ' off');
   }
   function renderTabs() {
-    ['add', 'history', 'reflect'].forEach(function (t) {
+    ['add', 'history', 'month', 'reflect'].forEach(function (t) {
       $('tab' + t.charAt(0).toUpperCase() + t.slice(1)).hidden = t !== tab;
     });
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) { b.className = 'tab' + (b.getAttribute('data-tab') === tab ? ' on' : ''); });
   }
-  function switchTab(t) {
-    tab = t; renderTabs();
+  function onTab(t) {
     if (t === 'history') { renderHistory(); loadHistory(); }
-    if (t === 'reflect') { loadSummary(); }
+    if (t === 'month') loadMonth();
+    if (t === 'reflect') loadSummary();
   }
+  function switchTab(t) { tab = t; renderTabs(); onTab(t); }
   function renderAll() {
     renderNet();
     if (screen !== 'main') return;
-    renderBanner(); renderQueue(); renderFavs(); renderEdit();
+    renderBanner(); renderPreview(); renderQueue(); renderFavs(); renderEdit();
     if (tab === 'history') renderHistory();
   }
   async function refresh() {
@@ -99,13 +100,53 @@
     return { week: b.week, weekLeft: wl, monthLeft: ml, pending: pending };
   }
   function leftHtml(n) { return n < 0 ? '<b class="neg">over by ' + money(n) + '</b>' : '<b>' + money(n) + '</b> left'; }
+
+  // How much of an allowance is used, and whether that deserves a warning: 0 = fine, 1 = getting close, 2 = over.
+  function level(allowance, left) {
+    if (!(allowance > 0)) return { lev: 0, pct: 0 };
+    var pct = Math.round((allowance - left) / allowance * 100), warn = (cfg && cfg.warnAt) || 80;
+    return { lev: left < 0 ? 2 : (pct >= warn ? 1 : 0), pct: pct };
+  }
+  function budgetLevels(weekLeft, monthLeft) {
+    var b = cfg && cfg.budget;
+    return { week: level(b && b.weekAllowance, weekLeft), month: level(b && b.free, monthLeft) };
+  }
+  function alertLines(weekLeft, monthLeft) {
+    var lv = budgetLevels(weekLeft, monthLeft), out = [];
+    [['week', lv.week], ['month', lv.month]].forEach(function (x) {
+      if (x[1].lev === 2) out.push({ lev: 2, text: 'Over this ' + x[0] + "'s allowance" });
+      else if (x[1].lev === 1) out.push({ lev: 1, text: x[1].pct + '% of this ' + x[0] + "'s allowance used" });
+    });
+    return out;
+  }
+  function alertHtml(lines) {
+    return lines.map(function (l) { return '<span class="alertline ' + (l.lev === 2 ? 'over' : 'warn') + '">' + (l.lev === 2 ? '\u26a0 ' : '') + esc(l.text) + '</span>'; }).join('');
+  }
   function renderBanner() {
     var est = estimate(), box = $('banner');
     if (!est) { box.hidden = true; return; }
-    var html = 'Week ' + est.week + ': ' + leftHtml(est.weekLeft) + ' &middot; Month: ' + leftHtml(est.monthLeft);
+    var lines = alertLines(est.weekLeft, est.monthLeft);
+    var worst = lines.reduce(function (m, l) { return Math.max(m, l.lev); }, 0);
+    box.className = 'banner' + (worst === 2 ? ' over' : worst === 1 ? ' warn' : '');
+    var html = 'Week ' + est.week + ': ' + leftHtml(est.weekLeft) + ' &middot; Month: ' + leftHtml(est.monthLeft) + alertHtml(lines);
     if (est.pending) html += '<small>Estimate: ' + est.pending + ' entr' + (est.pending === 1 ? 'y' : 'ies') + ' not synced yet</small>';
     else if (!navigator.onLine) html += '<small>Offline: last known figures</small>';
     box.innerHTML = html; box.hidden = false;
+  }
+
+  // Under the amount: what the week and month would look like if you save this entry.
+  function renderPreview() {
+    var box = $('preview'), est = estimate();
+    var amount = parseFloat(($('amount').value || '').replace(/,/g, ''));
+    if (editing || !est || !(amount > 0) || $('type').value === 'Savings' || (cfg.fixed || []).indexOf($('category').value) !== -1) { box.hidden = true; return; }
+    var b = cfg.budget, date = $('date').value || todayStr();
+    if (String(date).slice(0, 7) !== b.ym) { box.hidden = true; return; }
+    var wl = est.weekLeft, ml = est.monthLeft - amount;
+    if (weekOf(date) === b.week) wl -= amount;
+    var worst = alertLines(wl, ml).reduce(function (m, l) { return Math.max(m, l.lev); }, 0);
+    box.className = worst === 2 ? 'err' : worst === 1 ? 'warn' : 'hint';
+    box.innerHTML = 'After this: week ' + leftHtml(wl) + ' &middot; month ' + leftHtml(ml);
+    box.hidden = false;
   }
 
   // ---------- the Add form ----------
@@ -119,7 +160,7 @@
     for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === value) return;
     var o = document.createElement('option'); o.value = value; o.textContent = value; sel.appendChild(o);
   }
-  function syncType() { if (cfg && cfg.types) $('type').value = cfg.types[$('category').value] || 'Extra'; }
+  function syncType() { if (cfg && cfg.types) $('type').value = cfg.types[$('category').value] || 'Extra'; renderPreview(); }
   function buildForm() {
     if (!cfg) return;
     $('cur').textContent = cur(); $('curTag').textContent = cur();
@@ -136,7 +177,28 @@
     return { amount: amount, category: $('category').value, type: $('type').value, payment: $('payment').value,
              remarks: $('remarks').value, date: $('date').value || todayStr(), time: $('time').value || '' };
   }
-  function afterUnlock() { buildForm(); if (!editing) setNow(); renderAll(); loadConfig(); runSync(); }
+  function afterUnlock() { buildForm(); if (!editing) setNow(); renderAll(); tryFund(); onTab(tab); loadConfig(); runSync(); }
+
+  // ---------- home-screen shortcuts: the app can open straight to a screen, or to a fund payment ----------
+  var pendingFund = '';
+  function applyHash() {
+    var h = location.hash.replace('#', '');
+    if (h === 'zakat' || h === 'qurbani') { tab = 'add'; pendingFund = h; }
+    else if (['add', 'history', 'month', 'reflect'].indexOf(h) >= 0) { tab = h; pendingFund = ''; }
+    else return;
+    if (screen === 'main') { renderTabs(); onTab(tab); tryFund(); }
+  }
+  function tryFund() {
+    if (!pendingFund || screen !== 'main' || !cfg || !formReady) return;
+    var name = pendingFund, cat = '';
+    (cfg.funds || []).forEach(function (f) { if (norm(f.name) === name) cat = f.category; });
+    if (!cat) cfg.categories.forEach(function (c) { if (!cat && norm(c).indexOf(name) >= 0) cat = c; });
+    pendingFund = '';
+    if (cat && cfg.categories.indexOf(cat) >= 0) {
+      if (editing) endEdit();
+      $('category').value = cat; syncType(); renderTabs(); $('amount').focus();
+    }
+  }
 
   // ---------- favourites ----------
   function renderFavs() {
@@ -190,7 +252,7 @@
     if (r.kind === 'ok') {
       await Core.kvSet('cfg', r.cfg); cfg = r.cfg;
       if (r.cfg.person && r.cfg.person !== conn.person) { conn.person = r.cfg.person; await Core.kvSet('conn', conn); }
-      buildForm(); renderAll();
+      buildForm(); renderAll(); tryFund();
       $('retryCfg').hidden = true;
       if (cfgMsg && $('status').textContent === cfgMsg) { say('', ''); cfgMsg = ''; }
     } else if (r.kind === 'auth') {
@@ -222,7 +284,11 @@
       if (screen !== 'main') return;
       if (r.failed) say(r.failed + ' entr' + (r.failed === 1 ? 'y needs' : 'ies need') + ' attention', 'err');
       else if (r.waiting) say('Saved on this phone: ' + r.waiting + ' waiting to sync' + (r.problem && navigator.onLine ? ' (' + r.problem + ')' : ''), 'warn');
-      else if (r.synced) { say('Synced to your sheet \u2713', 'ok'); $('after').innerHTML = noteFor(r.lastRes); }
+      else if (r.synced) {
+        say('Synced to your sheet \u2713', 'ok');
+        var est = estimate(), warn = est ? alertHtml(alertLines(est.weekLeft, est.monthLeft)) : '';
+        $('after').innerHTML = noteFor(r.lastRes) + (warn ? (noteFor(r.lastRes) ? '<br>' : '') + warn : '');
+      }
     } catch (e) {
       say('Sync problem: ' + (e && e.message || e), 'err');
     } finally { syncing = false; }
@@ -447,11 +513,114 @@
     }
   }
 
+  // ---------- Month ----------
+  var TYPE_COLORS = { Needs: '#2563eb', Wants: '#f59e0b', Culture: '#10b981', Extra: '#ef4444' };
+  function monthDate(n) {
+    var t = todayStr(), d = new Date(Date.UTC(+t.slice(0, 4), +t.slice(5, 7) - 1 - n, 1));
+    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + (n === 0 ? t.slice(8, 10) : '01');
+  }
+  function short(n) { return n >= 1000 ? (Math.round(n / 100) / 10) + 'k' : String(Math.round(n)); }
+  function barRow(label, value, pct, color) {
+    return '<div class="bar"><span class="lab">' + esc(label) + '</span><div class="track"><div class="fill" style="width:' + Math.max(2, Math.min(100, pct)) + '%' +
+      (color ? ';background:' + color : '') + '"></div></div><span class="val">' + esc(value) + '</span></div>';
+  }
+  function weeksSvg(weeks) {
+    var n = weeks.length, bw = 300 / n, base = 92, top = 14, max = 1;
+    weeks.forEach(function (w) { max = Math.max(max, w.spent, w.allowance || 0); });
+    var out = '<svg class="chart" viewBox="0 0 300 110" role="img" aria-label="Spending against allowance, by week">';
+    weeks.forEach(function (w, i) {
+      var x = i * bw + bw * 0.2, wd = bw * 0.6, hs = w.spent / max * (base - top), ha = w.allowance ? w.allowance / max * (base - top) : 0;
+      var over = w.allowance && w.spent > w.allowance;
+      if (ha) out += '<rect x="' + x.toFixed(1) + '" y="' + (base - ha).toFixed(1) + '" width="' + wd.toFixed(1) + '" height="' + ha.toFixed(1) + '" style="fill:none;stroke:var(--muted);stroke-dasharray:3 2"/>';
+      out += '<rect x="' + x.toFixed(1) + '" y="' + (base - hs).toFixed(1) + '" width="' + wd.toFixed(1) + '" height="' + Math.max(hs, 0.5).toFixed(1) + '" style="fill:' + (over ? 'var(--err)' : 'var(--accent)') + '"/>';
+      out += '<text x="' + (x + wd / 2).toFixed(1) + '" y="' + (base - Math.max(hs, ha) - 3).toFixed(1) + '" text-anchor="middle">' + short(w.spent) + '</text>';
+      out += '<text x="' + (x + wd / 2).toFixed(1) + '" y="103" text-anchor="middle">' + esc(w.label) + '</text>';
+    });
+    return out + '<line x1="0" y1="' + base + '" x2="300" y2="' + base + '" style="stroke:var(--line)"/></svg>';
+  }
+  function daysSvg(days, today) {
+    var n = days.length, bw = 300 / n, base = 56, max = 1;
+    days.forEach(function (d) { max = Math.max(max, d.spent); });
+    var out = '<svg class="chart" viewBox="0 0 300 70" role="img" aria-label="Spending by day">';
+    days.forEach(function (d, i) {
+      var h = d.spent / max * (base - 6);
+      out += '<rect x="' + (i * bw + bw * 0.12).toFixed(1) + '" y="' + (base - h).toFixed(1) + '" width="' + (bw * 0.76).toFixed(1) + '" height="' + Math.max(h, d.spent ? 1 : 0).toFixed(1) +
+        '" style="fill:' + (d.d === today ? 'var(--warn)' : 'var(--accent)') + '"/>';
+    });
+    [0, Math.floor((n - 1) / 2), n - 1].forEach(function (i, k) {
+      if (k && i === 0) return;
+      out += '<text x="' + (i * bw + bw / 2).toFixed(1) + '" y="67" text-anchor="middle">' + days[i].d + '</text>';
+    });
+    return out + '<line x1="0" y1="' + base + '" x2="300" y2="' + base + '" style="stroke:var(--line)"/></svg>';
+  }
+  function showMonth(d, stale, n) {
+    var s = d.stats, p = d.prev, h = '<b>' + esc(s.label) + '</b>';
+    var left = s.remaining, isOver = left !== null && left < 0;
+    h += '<div class="kpis"><div><small>Spent</small><b>' + money(s.spent) + '</b></div>' +
+         '<div><small>Allowance</small><b>' + (s.allowance === null ? '-' : money(s.allowance)) + '</b></div>' +
+         '<div><small>' + (isOver ? 'Over by' : 'Left') + '</small><b class="' + (isOver ? 'neg' : '') + '">' + (left === null ? '-' : money(left)) + '</b></div></div>';
+    if (s.allowance) {
+      var lv = level(s.allowance, left), color = lv.lev === 2 ? 'var(--err)' : lv.lev === 1 ? 'var(--warn)' : '';
+      h += barRow('Allowance used', lv.pct + '%', lv.pct, color);
+    }
+    var days = n === 0 ? +todayStr().slice(8, 10) : (s.daily ? s.daily.length : 1);
+    var note = [];
+    if (s.count) note.push(money(s.spent / days) + ' a day');
+    if (s.fixedPaid) note.push('fixed costs paid ' + money(s.fixedPaid));
+    if (s.savingsPaid) note.push('savings and funds paid ' + money(s.savingsPaid));
+    if (p && p.spent > 0) { var diff = Math.round((s.spent - p.spent) / p.spent * 100); note.push((diff === 0 ? 'same as ' : (diff > 0 ? 'up ' : 'down ') + Math.abs(diff) + '% on ') + esc(p.label)); }
+    if (note.length) h += '<p class="hint" style="margin:6px 0 0">' + note.join(' &middot; ') + '</p>';
+
+    var total = 0; ['Needs', 'Wants', 'Culture', 'Extra'].forEach(function (t) { total += s.byType[t]; });
+    h += '<h3 class="sec">Kakeibo split</h3>';
+    if (!total) h += '<p class="hint">No spending recorded yet.</p>';
+    else {
+      h += '<div class="stack">' + ['Needs', 'Wants', 'Culture', 'Extra'].map(function (t) {
+        return s.byType[t] ? '<div style="width:' + (s.byType[t] / total * 100).toFixed(1) + '%;background:' + TYPE_COLORS[t] + '"></div>' : '';
+      }).join('') + '</div><div class="legend">' + ['Needs', 'Wants', 'Culture', 'Extra'].map(function (t) {
+        return '<span><span class="dot" style="background:' + TYPE_COLORS[t] + '"></span>' + t + ' ' + fmt(s.byType[t]) + ' (' + Math.round(s.byType[t] / total * 100) + '%)</span>';
+      }).join('') + '</div>';
+    }
+    var cats = (s.byCategory || []).slice(0, 8);
+    if (cats.length) {
+      h += '<h3 class="sec">By category</h3>';
+      cats.forEach(function (c) { h += barRow(c.category, fmt(c.amount), c.amount / cats[0].amount * 100); });
+    }
+    if (s.weeks && s.weeks.length) h += '<h3 class="sec">By week <span class="meta">(dashed = allowance)</span></h3>' + weeksSvg(s.weeks);
+    if (s.daily && s.daily.length) h += '<h3 class="sec">By day</h3>' + daysSvg(s.daily, n === 0 ? +todayStr().slice(8, 10) : 0);
+    if (d.funds && d.funds.length) {
+      h += '<h3 class="sec">Funds</h3>' + d.funds.map(function (f) {
+        return '<div class="bar"><span class="lab">' + esc(f.name) + '</span><span class="val" style="flex:1;text-align:left;color:var(--text)">' + (f.balance < 0 ? '<b class="neg">overdrawn by ' + money(f.balance) + '</b>' : '<b>' + money(f.balance) + '</b> set aside') + '</span></div>';
+      }).join('');
+    }
+    if (stale) h += '<p class="meta">Last loaded numbers.</p>';
+    $('monBody').innerHTML = h;
+  }
+  async function loadMonth() {
+    var n = +$('monPeriod').value, date = monthDate(n), key = 'month:' + date.slice(0, 7);
+    var cached = await Core.kvGet(key);
+    if (cached) showMonth(cached, true, n); else $('monBody').innerHTML = '<p class="hint">Loading your numbers...</p>';
+    if (!conn || !conn.token) return;
+    try {
+      var r = await Core.api(conn, 'summary', { period: 'month', date: date, detail: true });
+      if (n !== +$('monPeriod').value) return;
+      if (r && r.ok) { var d = { stats: r.stats, prev: r.prev, funds: r.funds || [] }; await Core.kvSet(key, d); showMonth(d, false, n); }
+      else if (r && r.error === 'Not authorised') needAuth('This phone needs to sign in again.');
+    } catch (e) {
+      if (!cached) $('monBody').innerHTML = '<p class="hint">Connect to the internet to see your month. After that it is kept on your phone.</p>';
+    }
+  }
+
   // ---------- events ----------
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
     b.addEventListener('click', function () { switchTab(b.getAttribute('data-tab')); });
   });
   $('category').addEventListener('change', syncType);
+  $('type').addEventListener('change', renderPreview);
+  $('amount').addEventListener('input', renderPreview);
+  $('date').addEventListener('change', renderPreview);
+  $('monPeriod').addEventListener('change', loadMonth);
+  window.addEventListener('hashchange', applyHash);
   $('refPeriod').addEventListener('change', loadSummary);
   $('histRefresh').addEventListener('click', function () { loadHistory(); });
 
@@ -559,7 +728,8 @@
   $('resetLink').addEventListener('click', async function () {
     var n = queue.length;
     if (!confirm(n ? n + ' entries have not reached your sheet yet and will be lost. Reset anyway?' : 'Reset this app on this phone?')) return;
-    ['conn', 'cfg', 'pin', 'prefs', 'favs', 'recent', 'summary:week0', 'summary:week1', 'summary:month0', 'summary:month1'].forEach(function (k) { Core.kvDel(k); });
+    ['conn', 'cfg', 'pin', 'prefs', 'favs', 'recent'].forEach(function (k) { Core.kvDel(k); });
+    (await Core.kvKeys()).forEach(function (k) { if (/^(summary|month):/.test(String(k))) Core.kvDel(k); });
     await Core.qClear();
     conn = null; cfg = null; pinRec = null; queue = []; favs = []; prefs = {}; recent = []; forceActivate = false; forgot = false; formReady = false;
     say('', ''); route();
@@ -598,13 +768,12 @@
       }
       try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
     }
-    var h = location.hash.replace('#', '');
-    if (['add', 'history', 'reflect'].indexOf(h) >= 0) tab = h;
+    applyHash();
 
     await refresh();
     locked = !!pinRec;               // the PIN is asked for every time the app starts
     route();
-    if (tab === 'history' && screen === 'main') loadHistory();
+    if (screen === 'main') onTab(tab);
     if (conn && conn.token) { await loadConfig(); await runSync(); }   // sending entries does not need the PIN
     if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
   }

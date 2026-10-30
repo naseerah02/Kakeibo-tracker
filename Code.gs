@@ -4,7 +4,7 @@
  *
  * This script is the "server" for the Android app. Everything lives in this Google Sheet:
  *   Expenses     one row per expense
- *   Settings     summary email, currency, categories (+ Kakeibo type, fixed?), people + emails, payment modes, funds
+ *   Settings     summary email, currency, budget warning %, categories (+ Kakeibo type, fixed?), people + emails, payment modes, funds
  *   Plan         monthly household plan (income, fixed costs, savings goal, Zakat/Qurbani set-aside)
  *   Funds        Zakat and Qurbani ledger (set-aside, paid, balance)
  *   Recurring    expenses added automatically every month (rent, subscriptions...)
@@ -81,9 +81,10 @@ function setup() {
   const st = ss.getSheetByName(SETTINGS) || ss.insertSheet(SETTINGS);
   if (st.getLastRow() === 0) {
     st.getRange('A1:B1').setValues([['Setting', 'Value']]).setFontWeight('bold');
-    st.getRange('A2:B3').setValues([
+    st.getRange('A2:B4').setValues([
       ['Summary email (comma-separated)', ''],
-      ['Currency', 'PKR']
+      ['Currency', 'PKR'],
+      ['Budget warning at (% of allowance used)', 80]
     ]);
     st.getRange('D1:F1').setValues([['Categories', 'Kakeibo type', 'Fixed cost?']]).setFontWeight('bold');
     st.getRange('H1:I1').setValues([['People', 'Email']]).setFontWeight('bold');
@@ -126,6 +127,8 @@ function setup() {
   // Upgrade older sheets: the shared secret key is gone (each phone now gets its own token after an email code).
   if (String(st.getRange('A2').getValue()) === 'Secret key') st.getRange('A2:B2').setValues([['Summary email (comma-separated)', '']]);
   if (!String(st.getRange('I1').getValue())) st.getRange('I1').setValue('Email').setFontWeight('bold');
+
+  if (!String(st.getRange('A4').getValue())) st.getRange('A4:B4').setValues([['Budget warning at (% of allowance used)', 80]]);
 
   // Earmarked funds: each fund is linked to one category (payments are logged in the form as that category)
   if (!String(st.getRange('L1').getValue())) {
@@ -284,6 +287,8 @@ function configFor_(auth) {
     kakeiboTypes: KAKEIBO_TYPES,
     payments: cfg.payments,
     lockSeconds: LOCK_SECONDS,
+    warnAt: cfg.warnAt,
+    funds: cfg.funds.slice(0, 2),
     budget: safeBudget_(today_())
   };
 }
@@ -575,7 +580,7 @@ function getBudget_(dateStr) {
     if (dd >= wStart && dd <= wEnd) weekSpent += r.amt;
   });
   const weekAllowance = plan.free / daysInMonth * (wEnd - wStart + 1);
-  return { hasPlan: true, ym: ym, week: weekIndex + 1, weekLeft: Math.round(weekAllowance - weekSpent),
+  return { hasPlan: true, ym: ym, week: weekIndex + 1, weekAllowance: Math.round(weekAllowance), weekLeft: Math.round(weekAllowance - weekSpent),
            monthLeft: Math.round(plan.free - monthSpent), free: Math.round(plan.free) };
 }
 
@@ -633,7 +638,7 @@ function fundBalances_(dateStr) {
 // ======================================================================
 
 /** Numbers for one week block (days 1-7, 8-14...) or one month, containing dateStr. */
-function computeStats_(rows, period, dateStr, cfg) {
+function computeStats_(rows, period, dateStr, cfg, detail) {
   const y = +dateStr.slice(0, 4), m = +dateStr.slice(5, 7), day = +dateStr.slice(8, 10);
   const dim = new Date(y, m, 0).getDate();
   const ym = dateStr.slice(0, 7);
@@ -646,7 +651,7 @@ function computeStats_(rows, period, dateStr, cfg) {
     label = MONTH_NAMES[m - 1] + ' ' + y;
   }
   const byType = { Needs: 0, Wants: 0, Culture: 0, Extra: 0 };
-  const cats = {};
+  const cats = {}, dailyFlex = {}, weekFlex = [0, 0, 0, 0, 0];
   let flex = 0, fixedPaid = 0, savingsPaid = 0, count = 0;
   rows.forEach(function (r) {
     if (r.ds.slice(0, 7) !== ym) return;
@@ -657,12 +662,14 @@ function computeStats_(rows, period, dateStr, cfg) {
     flex += r.amt; count++;
     byType[byType.hasOwnProperty(r.type) ? r.type : 'Extra'] += r.amt;
     cats[r.cat] = (cats[r.cat] || 0) + r.amt;
+    dailyFlex[d] = (dailyFlex[d] || 0) + r.amt;
+    weekFlex[Math.floor((d - 1) / 7)] += r.amt;
   });
   const plan = planFor_(dateStr);
   const allowance = plan ? (period === 'week' ? plan.free / dim * (b - a + 1) : plan.free) : null;
   const top = Object.keys(cats).map(function (c) { return { category: c, amount: Math.round(cats[c]) }; })
     .sort(function (x, y2) { return y2.amount - x.amount; }).slice(0, 3);
-  return {
+  const out = {
     period: period, label: label, from: ym + '-' + ('0' + a).slice(-2), to: ym + '-' + ('0' + b).slice(-2),
     spent: Math.round(flex), fixedPaid: Math.round(fixedPaid), savingsPaid: Math.round(savingsPaid), count: count,
     byType: { Needs: Math.round(byType.Needs), Wants: Math.round(byType.Wants), Culture: Math.round(byType.Culture), Extra: Math.round(byType.Extra) },
@@ -671,6 +678,20 @@ function computeStats_(rows, period, dateStr, cfg) {
     income: plan ? plan.income : null, goal: plan ? plan.savings : null,
     leftAfterSpending: plan ? Math.round(plan.income - flex - fixedPaid) : null
   };
+  if (detail) {   // extra figures for the app's Month tab
+    out.byCategory = Object.keys(cats).map(function (c) { return { category: c, amount: Math.round(cats[c]) }; })
+      .sort(function (x, y2) { return y2.amount - x.amount; }).slice(0, 12);
+    out.daily = [];
+    for (let d = a; d <= b; d++) out.daily.push({ d: d, spent: Math.round(dailyFlex[d] || 0) });
+    if (period === 'month') {
+      out.weeks = [];
+      for (let w = 0; w * 7 < dim; w++) {
+        const ws = w * 7 + 1, we = Math.min(ws + 6, dim);
+        out.weeks.push({ label: ws + '-' + we, spent: Math.round(weekFlex[w]), allowance: plan ? Math.round(plan.free / dim * (we - ws + 1)) : null });
+      }
+    }
+  }
+  return out;
 }
 
 function shiftDate_(dateStr, days) {
@@ -690,9 +711,11 @@ function summaryFor_(p) {
   if (!dateStr) return { ok: false, error: 'Invalid date' };
   const cfg = getConfig_();
   const rows = readExpenses_();
-  const stats = computeStats_(rows, period, dateStr, cfg);
+  const stats = computeStats_(rows, period, dateStr, cfg, !!p.detail);
   const prev = computeStats_(rows, period, previousDate_(period, dateStr), cfg);
-  return { ok: true, stats: stats, prev: { label: prev.label, spent: prev.spent } };
+  const res = { ok: true, stats: stats, prev: { label: prev.label, spent: prev.spent } };
+  if (p.detail) res.funds = fundBalances_(dateStr);   // fund balances for the app's Month tab
+  return res;
 }
 
 function saveReflection_(p, auth) {
@@ -846,6 +869,7 @@ function getConfig_() {
   });
   return {
     currency: String(st.getRange('B3').getValue() || ''),
+    warnAt: (function (v) { return v >= 50 && v <= 99 ? Math.round(v) : 80; })(Number(st.getRange('B4').getValue())),
     summaryEmails: String(st.getRange('B2').getValue() || '').split(/[,;\s]+/).filter(function (x) { return x.indexOf('@') > 0; }),
     categories: catRows.map(function (r) { return String(r[0]); }),
     types: types,
