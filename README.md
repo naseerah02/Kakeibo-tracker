@@ -1,4 +1,4 @@
-# Kakeibo Family Expense Tracker (Android, v2.1)
+# Kakeibo Family Expense Tracker (Android, v2.2)
 
 A private family expense tracker built on a Google Sheet and an installable Android app. Log an expense in a few taps, even with no internet. Each phone signs in with an emailed code and a PIN, and everything lands in one shared sheet with a dashboard based on the Japanese **Kakeibo** budgeting method.
 
@@ -46,7 +46,7 @@ A private family expense tracker built on a Google Sheet and an installable Andr
 | **Offline** | Entries are queued on the phone and sent later, also in the background when Android allows. |
 | **Sign-in** | Email code (OTP) once per phone, then a PIN each time the app opens. Phones can be revoked. |
 | **Kakeibo** | Needs, Wants, Culture, Extra and Savings. A monthly household **Plan** gives a weekly allowance and a budget banner. |
-| **Funds** | Zakat and Qurbani earmarked funds with a running balance. |
+| **Funds** | Zakat and Qurbani earmarked funds with a running balance, an optional **target amount and date** for each, and reminders (in the app and by email) when a fund is behind. |
 | **Recurring** | Rent, subscriptions and instalments are added automatically each month. |
 | **Reflect** | A weekly or monthly reflection screen with your numbers and three Kakeibo questions, saved to the sheet. |
 | **Emails** | A weekly summary (Sunday evening) and a monthly summary (the 1st). |
@@ -104,7 +104,7 @@ README.md                  This file
 | Tab | Purpose |
 |---|---|
 | `Expenses` | One row per expense: Date, Month, Time, Category, Amount, Payment Mode, Remarks, Device Name, Person, ID, Kakeibo Type |
-| `Settings` | Summary email (B2), currency (B3), budget warning level (B4), categories with Kakeibo type and fixed flag, people with emails, payment modes, fund links |
+| `Settings` | Summary email (B2), currency (B3), budget warning level (B4), categories with Kakeibo type and fixed flag, people with emails, payment modes, fund links and fund targets |
 | `Plan` | One row per month: income, planned fixed costs, savings goal, Zakat and Qurbani set-asides |
 | `Funds` | Monthly Zakat and Qurbani ledger |
 | `Recurring` | Expenses added automatically every month |
@@ -138,6 +138,7 @@ Allow about 40 minutes the first time.
    - **B2**: the email address(es) that receive the weekly and monthly summaries (several can be separated by commas).
    - **B3**: the currency label (default `PKR`).
    - **B4**: the budget warning level, as a percentage of the allowance used (default `80`, allowed 50 to 99).
+   - **N and O** (rows 2 and 3, next to Zakat and Qurbani): an optional **target amount** and **target date** for each fund. See [Fund targets and reminders](#fund-targets-and-reminders).
    - Columns D to F: review the categories, their Kakeibo type and the fixed-cost flag.
 2. **Plan tab** (yellow cells): this month's **Income**, **Fixed costs (planned)**, **Savings goal**, and the **Zakat** and **Qurbani** set-asides. Plain numbers only.
 3. **Funds tab** (optional): opening balances in **B2** and **C2**.
@@ -174,7 +175,7 @@ The repository holds only code. It has no keys and no data.
    https://yourname.github.io/kakeibo-tracker/?api=...&person=Ali
    ```
    They contain no secret, only the script address and the person's name.
-4. Run **installTriggers** once. It schedules the recurring expenses (daily, about 6am), the weekly summary (Sunday, about 8pm) and the monthly summary (the 1st, about 8am).
+4. Run **installTriggers** once. It schedules the recurring expenses (daily, about 6am), the fund reminders (daily, about 7am), the weekly summary (Sunday, about 8pm) and the monthly summary (the 1st, about 8am).
 5. Send each person their link.
 
 ### Part 6. Sign in on each Android phone
@@ -204,6 +205,14 @@ The repository holds only code. It has no keys and no data.
 2. **Deploy > Manage deployments > pencil > New version > Deploy.**
 3. Upload the changed app files to GitHub, replacing the old ones: `index.html`, `app.js`, `core.js`, `sw.js` and `manifest.webmanifest`.
 4. Open the app online on each phone. The warnings and the Month tab appear after the app updates. The new shortcuts follow when Android refreshes the installed app, or after you reinstall it.
+
+### From version 2.1 to 2.2
+
+1. Paste the new `Code.gs`, save, and run **setup** (safe to re-run). It adds the target columns (N, O, P) to `Settings`.
+2. Run **installTriggers** again so the new daily fund reminder is scheduled. It replaces the old triggers and does not duplicate them.
+3. **Deploy > Manage deployments > pencil > New version > Deploy.**
+4. Upload `index.html`, `app.js` and `sw.js` to GitHub, replacing the old ones.
+5. Enter a target amount and date for Zakat and/or Qurbani in `Settings` columns N and O.
 
 ---
 
@@ -257,7 +266,7 @@ The **Month** tab is a summary of the whole month without opening the sheet. Cho
 - **By category:** your biggest categories.
 - **By week:** spending for each week block against its allowance (the dashed outline). A bar turns red when the week went over.
 - **By day:** a small chart of daily spending, with today highlighted.
-- **Funds:** the Zakat and Qurbani balances (red if overdrawn).
+- **Funds:** the Zakat and Qurbani balances (red if overdrawn). In the **This month** view, funds that have a target also show a progress bar, the days to go, and how much to set aside each month.
 - Fixed costs paid and savings or funds paid are shown as separate lines, because they do not count against the allowance.
 
 The numbers are kept on the phone, so a month you have already opened still shows offline, marked "Last loaded numbers".
@@ -412,6 +421,42 @@ Zakat can be paid in portions: each payment lowers the balance. Qurbani is usual
 
 > The tracker only records and totals. It does **not** calculate how much Zakat is due, which depends on your wealth on your Zakat date. Use a scholar or a trusted calculator. The set-aside is a plan, not a bank transfer.
 
+### Fund targets and reminders
+
+A target turns a fund from "money I have set aside" into "money I need by a date". Both are optional.
+
+**Setting a target.** In `Settings`, next to each fund (Zakat is row 2, Qurbani is row 3):
+
+| Column | Enter |
+|---|---|
+| **N: Target amount** | How much the fund should hold, for example `60000` |
+| **O: Target date** | When you need it, for example the date you expect Eid-ul-Adha, or your Zakat date |
+| **P: Last reminder** | Filled in by the script. Do not edit |
+
+The target is compared with the fund's **balance**. If you pay part of it early (for example Zakat in portions), the balance falls, so lower the target by the amount you paid, or set a new one.
+
+**What the app works out.**
+
+| Status | Meaning |
+|---|---|
+| **On track** | Your plan's monthly set-aside, carried to the target date, reaches the target |
+| **Behind** | It would fall short. The app shows how much to set aside **each month from now** instead, next to what the Plan tab sets aside today |
+| **Reached** | The balance is already at or above the target |
+| **Overdue** | The date passed in the last 30 days and the target was not reached |
+| **Past** | The date passed more than 30 days ago. Nothing more is shown, so set a new date when you are ready |
+
+"Months left" counts from this month to the month of the target date, and the amount needed each month is the remaining amount divided by that number (rounded up). If the target date is in the current month, the whole remainder is needed now.
+
+**Where you see it.**
+
+- **Add tab:** a banner appears only when a fund needs attention: behind and within 90 days (amber, red from 30 days), on track but within the last week ("have it ready"), or the date has just passed (red). **Hide for today** hides it until tomorrow.
+- **Month tab (This month):** every fund with a target shows a progress bar, the amounts, the days to go and the monthly amount needed.
+- **Weekly and monthly emails:** a "Fund targets" section.
+- **Reminder emails:** once a day (about 7am) the script checks each fund and emails the summary address at **90, 30 and 7 days** before the target date, and **on the day**. Behind funds get all four. A fund that is on track is only mentioned at 7 days and on the day. Nothing is sent once the target is reached, and nothing is repeated: the last reminder sent is noted in column P. If you change the target date, reminders start again for the new date.
+- **Dashboard:** the Earmarked funds block gains Target, Target date and Needed / month columns.
+
+Reminder emails need `installTriggers` to have been run, and an address in `Settings!B2`. If B2 is empty nothing is sent and nothing is recorded, so the reminders start as soon as you add an address.
+
 ---
 
 ## Recurring expenses
@@ -443,7 +488,7 @@ Then answer three short questions (different for weeks and months) and tap **Sav
 
 ### Summary emails
 
-- **Weekly:** Sunday around 8pm. This week's spending against the allowance, the month so far, top categories, fund balances, and a link to open the app.
+- **Weekly:** Sunday around 8pm. This week's spending against the allowance, the month so far, top categories, fund balances and targets, and a link to open the app.
 - **Monthly:** the 1st around 8am, covering the month that just ended, with the amount left after spending against your goal.
 
 They go to the address in `Settings!B2`. Run `installTriggers` once to schedule them, and `sendTestEmail` to check that email works.
@@ -474,6 +519,7 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 | Budget warning level | `Settings!B4` (percentage of the allowance used, 50 to 99, default 80) |
 | Home-screen shortcuts | `shortcuts` in `manifest.webmanifest` (Android shows at most four) |
 | Funds | `Settings` columns L:M link a fund name to its category |
+| Fund targets | `Settings` columns N (amount) and O (date), next to each fund. The reminder days (90, 30, 7 and 0) are `FUND_MILESTONES` in `Code.gs` |
 | Plan months | Add rows to `Plan` (up to 36 months) |
 | When emails and recurring run | Edit the hours in `installTriggers()` and run it again |
 | How long until the PIN is asked again | `LOCK_SECONDS` at the top of `Code.gs` |
@@ -484,7 +530,7 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 
 **Backend (`Code.gs`):** paste the new code, save, then **Deploy > Manage deployments > pencil > New version > Deploy**. If the dashboard changed, run `buildDashboard()`. If new tabs or columns were added, run `setup()` again (safe to re-run).
 
-**App files (GitHub):** upload the changed files to your repository (**Add file > Upload files**), replacing the old ones. If you changed any app file, also raise the version in `sw.js` (`expense-app-v5` becomes `v6`) so phones fetch the new copy. Each phone updates the next time you open the app with internet. Close and reopen the app once more if the old version still shows.
+**App files (GitHub):** upload the changed files to your repository (**Add file > Upload files**), replacing the old ones. If you changed any app file, also raise the version in `sw.js` (`expense-app-v6` becomes `v7`) so phones fetch the new copy. Each phone updates the next time you open the app with internet. Close and reopen the app once more if the old version still shows.
 
 ---
 
@@ -507,6 +553,9 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 | No amber or red warning | The `Plan` tab needs income for the month, since the allowance comes from it. The warning level is `Settings!B4`. |
 | The Month tab says "Connect to the internet" | That month has not been opened online yet. Open it once with internet and it is kept. |
 | The long-press shortcuts are missing or old | Android refreshes them on its own schedule (up to a day). Reinstalling the app updates them at once. Only four are shown. |
+| No fund reminder emails | Both a target amount and a target date are needed, the fund must not be reached or long past, an address must be in `Settings!B2`, and `installTriggers` must have been run. An on-track fund is only emailed in its last week. |
+| A fund shows "behind" although I have paid part of it | The target is compared with the balance. Lower the target by what you paid, or set a new one. |
+| The fund banner keeps coming back | **Hide for today** hides it for one day. Clear the target in `Settings` (or set the next date) to stop it. |
 | An entry is missing from History | Only your own entries with an ID appear, and only the latest 40. |
 | No budget banner | The `Plan` tab has no income for the current month. |
 | Recurring expense was not added | `Active` must be `Yes`, the start month must have begun, and `installTriggers` must have been run. Check the day of month. |
@@ -554,12 +603,12 @@ For developers. Everything except the health check is a `POST` to the `/exec` ad
 |---|---|---|---|
 | `otp_request` | no | `person` | `{"ok":true}` (the same reply whether or not the person exists) |
 | `otp_verify` | no | `person`, `code`, `deviceId`, `label` | `{"ok":true,"token":"...","person":"Ali"}` |
-| `config` | yes | none | currency, categories, types, fixed list, payments, `funds`, `warnAt`, `lockSeconds`, `budget` (including `weekAllowance`) |
+| `config` | yes | none | currency, categories, types, fixed list, payments, `funds`, `fundTargets`, `warnAt`, `lockSeconds`, `budget` (including `weekAllowance`) |
 | `save` (default) | yes | `amount`, `category`, `type`, `payment`, `remarks`, `device`, `date`, `time`, `id` | `{"ok":true,"type":...,"fixed":...,"saving":...,"fund":...,"budget":{...}}` |
 | `recent` | yes | none | `{"ok":true,"entries":[...]}` (own entries) |
 | `update` | yes | `id` plus the `save` fields | `{"ok":true,"budget":{...}}` |
 | `delete` | yes | `id` | `{"ok":true,"budget":{...}}` |
-| `summary` | yes | `period` (`week` or `month`), `date`, optional `detail: true` | `{"ok":true,"stats":{...},"prev":{...}}`. With `detail`, `stats` also has `byCategory`, `daily` and (for months) `weeks`, and the reply includes fund balances in `funds`. |
+| `summary` | yes | `period` (`week` or `month`), `date`, optional `detail: true` | `{"ok":true,"stats":{...},"prev":{...}}`. With `detail`, `stats` also has `byCategory`, `daily` and (for months) `weeks`, and the reply includes fund balances in `funds` and the fund targets in `targets`. |
 | `reflect` | yes | `kind` (`Weekly`/`Monthly`), `date`, `q1`, `q2`, `q3`, `id` | `{"ok":true}` |
 
 - `date` accepts `YYYY-MM-DD` or `DD/MM/YYYY`; `time` is `HH:mm`. Both default to now.
@@ -586,6 +635,8 @@ After installing, check each of these once:
 - [ ] Budget warnings: with the week close to its allowance the banner turns amber, and a large amount shows an amber or red line under the amount field
 - [ ] The Month tab shows figures, the Kakeibo split and charts, and still shows a month you opened before when you go offline
 - [ ] Touch and hold the app icon: the Pay Zakat shortcut opens the form with the Zakat category chosen
+- [ ] Set a Qurbani target and date in `Settings`: the Month tab shows its progress and the monthly amount needed
+- [ ] Set the target date about 20 days away with a low balance: the Add tab shows a red fund banner, and running `checkFundReminders` sends an email once (and not a second time)
 - [ ] A Zakat or Qurbani payment shows the fund balance and does not change the weekly figure
 - [ ] Reflect shows numbers and a saved reflection appears on the `Reflections` tab
 - [ ] A Recurring row set to Active: run `runRecurring` once and the entry appears
