@@ -18,7 +18,7 @@
   var favs = [], prefs = {};
   var locked = true, hiddenAt = 0, forceActivate = false, forgot = false;
   var screen = '', tab = 'add', editing = null, formReady = false;
-  var syncing = false, cfgMsg = '', histNote = '', installPrompt = null, resendTimer = null;
+  var syncing = false, cfgMsg = '', histNote = '', installPrompt = null, resendTimer = null, fundNoteDay = '';
 
   // ---------- small helpers ----------
   function newId() {
@@ -28,6 +28,9 @@
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
   function todayStr() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function daysBetween(a, b) {
+    return Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10))) / 86400000);
+  }
   function shiftDate(str, days) {
     var d = new Date(Date.UTC(+str.slice(0, 4), +str.slice(5, 7) - 1, +str.slice(8, 10) + days));
     return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
@@ -74,7 +77,7 @@
   function renderAll() {
     renderNet();
     if (screen !== 'main') return;
-    renderBanner(); renderPreview(); renderQueue(); renderFavs(); renderEdit();
+    renderBanner(); renderFundNote(); renderPreview(); renderQueue(); renderFavs(); renderEdit();
     if (tab === 'history') renderHistory();
   }
   async function refresh() {
@@ -132,6 +135,33 @@
     if (est.pending) html += '<small>Estimate: ' + est.pending + ' entr' + (est.pending === 1 ? 'y' : 'ies') + ' not synced yet</small>';
     else if (!navigator.onLine) html += '<small>Offline: last known figures</small>';
     box.innerHTML = html; box.hidden = false;
+  }
+
+  // ---------- fund targets: reminders on the Add tab ----------
+  // Shown only when a fund needs attention: behind within 90 days, on track in the last week, or the date just passed.
+  function fundAlerts() {
+    var out = [], today = todayStr();
+    ((cfg && cfg.fundTargets) || []).forEach(function (t) {
+      if (!(t.target > 0) || !t.targetDate || t.status === 'reached' || t.status === 'none' || t.status === 'past') return;
+      var days = daysBetween(today, t.targetDate);
+      if (days < 0) {
+        if (days >= -30) out.push({ lev: 2, text: t.name + ': the target date has passed and ' + money(t.remaining) + ' is still short.' });
+      } else if (t.status === 'behind' && days <= 90) {
+        out.push({ lev: days <= 30 ? 2 : 1, text: t.name + ': ' + days + ' day' + (days === 1 ? '' : 's') + ' to go. Set aside ' + money(t.needed) +
+          ' a month (plan: ' + money(t.planned) + ') to reach ' + money(t.target) + '.' });
+      } else if (t.status === 'on-track' && days <= 7) {
+        out.push({ lev: 1, text: t.name + ': ' + days + ' day' + (days === 1 ? '' : 's') + ' to go. On track: have ' + money(t.target) + ' ready.' });
+      }
+    });
+    return out;
+  }
+  function renderFundNote() {
+    var box = $('fundNote'), items = fundAlerts();
+    if (!items.length || fundNoteDay === todayStr()) { box.hidden = true; return; }
+    var worst = items.reduce(function (m, i) { return Math.max(m, i.lev); }, 0);
+    box.className = 'banner ' + (worst === 2 ? 'over' : 'warn');
+    $('fundNoteText').innerHTML = items.map(function (i) { return '<span class="alertline ' + (i.lev === 2 ? 'over' : 'warn') + '">' + esc(i.text) + '</span>'; }).join('');
+    box.hidden = false;
   }
 
   // Under the amount: what the week and month would look like if you save this entry.
@@ -553,6 +583,17 @@
     });
     return out + '<line x1="0" y1="' + base + '" x2="300" y2="' + base + '" style="stroke:var(--line)"/></svg>';
   }
+  function targetRow(t) {
+    var days = daysBetween(todayStr(), t.targetDate);
+    var color = t.status === 'reached' ? 'var(--ok)' : (t.status === 'behind' || t.status === 'overdue' || t.status === 'past') ? 'var(--warn)' : '';
+    var msg = t.status === 'reached' ? 'target reached'
+      : (t.status === 'overdue' || t.status === 'past') ? 'the target date has passed'
+      : days + ' day' + (days === 1 ? '' : 's') + ' to go';
+    if (t.status === 'behind') msg += ' &middot; set aside ' + money(t.needed) + ' a month (plan ' + money(t.planned) + ')';
+    else if (t.status === 'on-track') msg += ' &middot; on track';
+    return barRow(t.name, t.progress + '%', t.progress, color) +
+      '<p class="meta" style="margin:0 0 6px">' + money(t.balance) + ' of ' + money(t.target) + ' by ' + esc(t.targetDate) + ' &middot; ' + msg + '</p>';
+  }
   function showMonth(d, stale, n) {
     var s = d.stats, p = d.prev, h = '<b>' + esc(s.label) + '</b>';
     var left = s.remaining, isOver = left !== null && left < 0;
@@ -593,6 +634,8 @@
         return '<div class="bar"><span class="lab">' + esc(f.name) + '</span><span class="val" style="flex:1;text-align:left;color:var(--text)">' + (f.balance < 0 ? '<b class="neg">overdrawn by ' + money(f.balance) + '</b>' : '<b>' + money(f.balance) + '</b> set aside') + '</span></div>';
       }).join('');
     }
+    var targets = n === 0 ? (d.targets || []).filter(function (t) { return t.target > 0 && t.targetDate; }) : [];
+    if (targets.length) h += '<h3 class="sec">Fund targets</h3>' + targets.map(targetRow).join('');
     if (stale) h += '<p class="meta">Last loaded numbers.</p>';
     $('monBody').innerHTML = h;
   }
@@ -604,7 +647,7 @@
     try {
       var r = await Core.api(conn, 'summary', { period: 'month', date: date, detail: true });
       if (n !== +$('monPeriod').value) return;
-      if (r && r.ok) { var d = { stats: r.stats, prev: r.prev, funds: r.funds || [] }; await Core.kvSet(key, d); showMonth(d, false, n); }
+      if (r && r.ok) { var d = { stats: r.stats, prev: r.prev, funds: r.funds || [], targets: r.targets || [] }; await Core.kvSet(key, d); showMonth(d, false, n); }
       else if (r && r.error === 'Not authorised') needAuth('This phone needs to sign in again.');
     } catch (e) {
       if (!cached) $('monBody').innerHTML = '<p class="hint">Connect to the internet to see your month. After that it is kept on your phone.</p>';
@@ -620,6 +663,7 @@
   $('amount').addEventListener('input', renderPreview);
   $('date').addEventListener('change', renderPreview);
   $('monPeriod').addEventListener('change', loadMonth);
+  $('fundNoteX').addEventListener('click', async function () { fundNoteDay = todayStr(); await Core.kvSet('fundNoteDay', fundNoteDay); renderFundNote(); });
   window.addEventListener('hashchange', applyHash);
   $('refPeriod').addEventListener('change', loadSummary);
   $('histRefresh').addEventListener('click', function () { loadHistory(); });
@@ -728,10 +772,10 @@
   $('resetLink').addEventListener('click', async function () {
     var n = queue.length;
     if (!confirm(n ? n + ' entries have not reached your sheet yet and will be lost. Reset anyway?' : 'Reset this app on this phone?')) return;
-    ['conn', 'cfg', 'pin', 'prefs', 'favs', 'recent'].forEach(function (k) { Core.kvDel(k); });
+    ['conn', 'cfg', 'pin', 'prefs', 'favs', 'recent', 'fundNoteDay'].forEach(function (k) { Core.kvDel(k); });
     (await Core.kvKeys()).forEach(function (k) { if (/^(summary|month):/.test(String(k))) Core.kvDel(k); });
     await Core.qClear();
-    conn = null; cfg = null; pinRec = null; queue = []; favs = []; prefs = {}; recent = []; forceActivate = false; forgot = false; formReady = false;
+    conn = null; cfg = null; pinRec = null; queue = []; favs = []; prefs = {}; recent = []; fundNoteDay = ''; forceActivate = false; forgot = false; formReady = false;
     say('', ''); route();
   });
 
@@ -755,6 +799,7 @@
     pinRec = (await Core.kvGet('pin')) || null;
     prefs = (await Core.kvGet('prefs')) || {};
     favs = (await Core.kvGet('favs')) || [];
+    fundNoteDay = (await Core.kvGet('fundNoteDay')) || '';
     deviceId = (await Core.kvGet('deviceId')) || '';
     if (!deviceId) { deviceId = newId(); await Core.kvSet('deviceId', deviceId); }
 

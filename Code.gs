@@ -136,6 +136,14 @@ function setup() {
     st.getRange('L2:M3').setValues([['Zakat', 'Zakat 🤲'], ['Qurbani', 'Qurbani 🐐']]);
   }
 
+  // Fund targets: how much each fund should hold, and by when (optional). P is filled in by the reminder emails.
+  if (!String(st.getRange('N1').getValue())) {
+    st.getRange('N1:P1').setValues([['Target amount', 'Target date', 'Last reminder (script)']]).setFontWeight('bold');
+    st.getRange('N2:N10').setNumberFormat('#,##0');
+    st.getRange('O2:O10').setNumberFormat('dd/mm/yyyy');
+    st.getRange('P2:P10').setNumberFormat('@');
+  }
+
   // Plan: monthly set-aside for each fund (part of the Savings goal)
   if (!String(pl.getRange('H3').getValue())) {
     pl.getRange('H3:I3').setValues([['Zakat set-aside (part of savings)', 'Qurbani set-aside (part of savings)']])
@@ -288,7 +296,8 @@ function configFor_(auth) {
     payments: cfg.payments,
     lockSeconds: LOCK_SECONDS,
     warnAt: cfg.warnAt,
-    funds: cfg.funds.slice(0, 2),
+    funds: cfg.funds.slice(0, 2).map(function (f) { return { name: f.name, category: f.category }; }),
+    fundTargets: fundTargets_(today_()),
     budget: safeBudget_(today_())
   };
 }
@@ -634,6 +643,111 @@ function fundBalances_(dateStr) {
 }
 
 // ======================================================================
+// Fund targets and reminders
+// ======================================================================
+
+const FUND_MILESTONES = [90, 30, 7, 0];   // days before the target date when a reminder email is sent
+
+/** The Plan row in force on dateStr, including the Zakat and Qurbani set-aside columns (H, I). */
+function planRowFor_(dateStr) {
+  const plan = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PLAN);
+  if (!plan) return null;
+  let row = null, rowDay = '';
+  plan.getRange('A4:I39').getValues().forEach(function (r) {
+    if (!(r[0] instanceof Date)) return;
+    const d = dayStr_(r[0]);
+    if (d <= dateStr && d > rowDay) { row = r; rowDay = d; }
+  });
+  return row;
+}
+
+function daysBetween_(a, b) {
+  return Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10))) / 86400000);
+}
+
+function fmtDate_(ds) { return +ds.slice(8, 10) + ' ' + MONTH_NAMES[+ds.slice(5, 7) - 1].slice(0, 3) + ' ' + ds.slice(0, 4); }
+
+/**
+ * How each fund stands against its target (Settings N: amount, O: date). The target is compared with the fund balance.
+ * status: none (no target) | reached | on-track | behind | overdue (date passed in the last 30 days) | past (longer ago).
+ * "needed" is what to set aside each month from now to reach the target; "planned" is what the Plan tab sets aside now.
+ */
+function fundTargets_(dateStr) {
+  try {
+    const cfg = getConfig_(), hit = fundRow_(dateStr), prow = planRowFor_(dateStr);
+    return cfg.funds.slice(0, 2).map(function (f, i) {
+      const balance = hit ? Math.round(Number(hit[5 + i]) || 0) : 0;
+      const planned = prow ? Math.round(Number(prow[7 + i]) || 0) : 0;
+      const out = { name: f.name, category: f.category, balance: balance, planned: planned, target: f.target, targetDate: f.targetDate, status: 'none' };
+      if (!(f.target > 0) || !f.targetDate) return out;
+      const days = daysBetween_(dateStr, f.targetDate);
+      const months = (+f.targetDate.slice(0, 4) * 12 + +f.targetDate.slice(5, 7)) - (+dateStr.slice(0, 4) * 12 + +dateStr.slice(5, 7));
+      out.daysLeft = days; out.monthsLeft = Math.max(0, months);
+      out.remaining = Math.max(0, f.target - balance);
+      out.progress = Math.min(100, Math.max(0, Math.round(balance / f.target * 100)));
+      if (balance >= f.target) { out.status = 'reached'; out.needed = 0; return out; }
+      if (days < 0) { out.status = days >= -30 ? 'overdue' : 'past'; out.needed = out.remaining; return out; }
+      out.needed = months > 0 ? Math.ceil(out.remaining / months) : out.remaining;
+      out.projected = balance + planned * Math.max(0, months);
+      out.shortfall = Math.max(0, f.target - out.projected);
+      out.status = out.shortfall > 0 ? 'behind' : 'on-track';
+      return out;
+    });
+  } catch (err) { return []; }
+}
+
+/** One line about a fund, for emails. */
+function fundLine_(t) {
+  let h = '<b>' + t.name + '</b>: ' + money_(t.balance) + ' of ' + money_(t.target) + ' (' + t.progress + '%) by ' + fmtDate_(t.targetDate);
+  if (t.status === 'reached') h += ' &mdash; <span style="color:#15803d">target reached</span>';
+  else if (t.status === 'overdue' || t.status === 'past') h += ' &mdash; <span style="color:#b91c1c">the date has passed, ' + money_(t.remaining) + ' short</span>';
+  else if (t.status === 'behind') h += ' &mdash; <span style="color:#b45309">set aside ' + money_(t.needed) + ' a month to get there (plan: ' + money_(t.planned) + ')</span>';
+  else h += ' &mdash; on track';
+  return h;
+}
+
+function fundReminderHtml_(t) {
+  let h = '<div style="font-family:Arial,sans-serif;max-width:480px;color:#0f172a"><h2 style="margin:0 0 8px">' + t.name + ' fund reminder</h2>';
+  h += '<p style="font-size:16px">' + fundLine_(t) + '</p>';
+  h += '<p>' + (t.daysLeft >= 0 ? t.daysLeft + ' day' + (t.daysLeft === 1 ? '' : 's') + ' to go.' : 'The target date was ' + (-t.daysLeft) + ' day' + (t.daysLeft === -1 ? '' : 's') + ' ago.') + '</p>';
+  if (t.status === 'behind') {
+    h += '<p>At the current plan of ' + money_(t.planned) + ' a month the fund would reach ' + money_(t.projected) + ', which is <b>' + money_(t.shortfall) +
+         ' short</b>. To reach the target, raise the set-aside on the Plan tab to about <b>' + money_(t.needed) + ' a month</b>, or add the difference in one go.</p>';
+  } else if (t.status === 'on-track') {
+    h += '<p>You are on track. Make sure the money is ready for the payment.</p>';
+  } else if (t.status === 'overdue') {
+    h += '<p>If you have already paid, set a new target date (or clear this one) in Settings. Otherwise, the fund still needs ' + money_(t.remaining) + '.</p>';
+  }
+  const link = PWA_URL ? PWA_URL.replace(/\/?$/, '/') + '#month' : '';
+  h += '<p style="color:#64748b">Targets are set in Settings (columns N and O).' + (link ? ' <a href="' + link + '">Open the app</a>' : '') + '</p></div>';
+  return h;
+}
+
+/**
+ * Scheduled daily (see installTriggers). Emails the summary address when a fund with a target reaches 90, 30 or 7 days
+ * to go, and on the target date, as long as the target has not been reached. A fund that is on track is mentioned only
+ * at 7 days and on the day. The last reminder sent is noted in Settings column P so nothing is sent twice.
+ */
+function checkFundReminders() {
+  if (!getSummaryEmails_().length) { Logger.log('No summary email in Settings!B2, so no fund reminders were sent.'); return; }
+  const today = today_(), cfg = getConfig_();
+  const st = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SETTINGS);
+  fundTargets_(today).forEach(function (t, i) {
+    if (t.status === 'none' || t.status === 'reached' || t.status === 'past') return;
+    let due = null;
+    FUND_MILESTONES.forEach(function (m) { if (t.daysLeft <= m) due = m; });   // the smallest milestone already reached
+    if (due === null) return;
+    if (t.status === 'on-track' && due > 7) return;
+    const key = t.targetDate + '|' + due;
+    const fund = cfg.funds[i];
+    if (fund.lastReminder === key) return;
+    const subject = t.name + ' fund: ' + (t.daysLeft < 0 ? 'the target date has passed' : t.daysLeft === 0 ? 'due today' : t.daysLeft + ' day' + (t.daysLeft === 1 ? '' : 's') + ' to go');
+    sendEmail_(subject, fundReminderHtml_(t));
+    st.getRange(fund.row, 16).setValue(key);
+  });
+}
+
+// ======================================================================
 // Summaries, reflections and email
 // ======================================================================
 
@@ -714,7 +828,7 @@ function summaryFor_(p) {
   const stats = computeStats_(rows, period, dateStr, cfg, !!p.detail);
   const prev = computeStats_(rows, period, previousDate_(period, dateStr), cfg);
   const res = { ok: true, stats: stats, prev: { label: prev.label, spent: prev.spent } };
-  if (p.detail) res.funds = fundBalances_(dateStr);   // fund balances for the app's Month tab
+  if (p.detail) { res.funds = fundBalances_(dateStr); res.targets = fundTargets_(today_()); }   // for the app's Month tab
   return res;
 }
 
@@ -749,7 +863,7 @@ function money_(n) {
 }
 
 /** The HTML for the weekly and monthly emails. */
-function summaryHtml_(title, s, prev, funds, monthStats) {
+function summaryHtml_(title, s, prev, funds, monthStats, targets) {
   const row = function (a, b) { return '<tr><td style="padding:3px 12px 3px 0">' + a + '</td><td style="padding:3px 0;text-align:right"><b>' + b + '</b></td></tr>'; };
   let h = '<div style="font-family:Arial,sans-serif;max-width:480px;color:#0f172a">';
   h += '<h2 style="margin:0 0 4px">' + title + '</h2><div style="color:#64748b;margin-bottom:12px">' + s.label + '</div>';
@@ -774,6 +888,8 @@ function summaryHtml_(title, s, prev, funds, monthStats) {
     h += '<p style="color:#64748b">This month so far: ' + money_(monthStats.spent) + ' of ' + money_(monthStats.allowance) + '</p>';
   }
   if (funds && funds.length) h += '<p><b>Funds:</b> ' + funds.map(function (f) { return f.name + ' ' + (f.balance < 0 ? '-' : '') + money_(f.balance); }).join(' &middot; ') + '</p>';
+  const tl = (targets || []).filter(function (t) { return t.target > 0 && t.targetDate; });
+  if (tl.length) h += '<p style="margin-bottom:4px"><b>Fund targets</b></p>' + tl.map(fundLine_).join('<br>');
   const link = PWA_URL ? PWA_URL.replace(/\/?$/, '/') + '#reflect' : '';
   h += '<p style="margin-top:18px">Take two minutes to reflect: what went well, and what will you do differently?' +
     (link ? ' <a href="' + link + '">Open the app</a>' : '') + '</p></div>';
@@ -792,7 +908,7 @@ function sendWeeklySummary() {
   const wk = computeStats_(rows, 'week', today, cfg);
   const prev = computeStats_(rows, 'week', previousDate_('week', today), cfg);
   const mo = computeStats_(rows, 'month', today, cfg);
-  sendEmail_('Weekly money summary: ' + wk.label, summaryHtml_('Your weekly summary', wk, prev, fundBalances_(today), mo));
+  sendEmail_('Weekly money summary: ' + wk.label, summaryHtml_('Your weekly summary', wk, prev, fundBalances_(today), mo, fundTargets_(today)));
 }
 
 /** Scheduled on the 1st of the month: the month that just ended. */
@@ -801,7 +917,7 @@ function sendMonthlySummary() {
   const last = previousDate_('month', today_());
   const mo = computeStats_(rows, 'month', last, cfg);
   const prev = computeStats_(rows, 'month', previousDate_('month', last), cfg);
-  sendEmail_('Monthly money summary: ' + mo.label, summaryHtml_('Your monthly summary', mo, prev, fundBalances_(last), null));
+  sendEmail_('Monthly money summary: ' + mo.label, summaryHtml_('Your monthly summary', mo, prev, fundBalances_(last), null, fundTargets_(today_())));
 }
 
 // ======================================================================
@@ -845,14 +961,15 @@ function runRecurring() {
 
 /** Run once. Creates the daily recurring check, the weekly email (Sunday evening) and the monthly email (1st). */
 function installTriggers() {
-  const mine = ['runRecurring', 'sendWeeklySummary', 'sendMonthlySummary'];
+  const mine = ['runRecurring', 'sendWeeklySummary', 'sendMonthlySummary', 'checkFundReminders'];
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (mine.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('runRecurring').timeBased().everyDays(1).atHour(6).create();
+  ScriptApp.newTrigger('checkFundReminders').timeBased().everyDays(1).atHour(7).create();
   ScriptApp.newTrigger('sendWeeklySummary').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(20).create();
   ScriptApp.newTrigger('sendMonthlySummary').timeBased().onMonthDay(1).atHour(8).create();
-  Logger.log('Triggers installed: recurring daily ~6am, weekly summary Sunday ~8pm, monthly summary on the 1st ~8am (script time zone).');
+  Logger.log('Triggers installed: recurring daily ~6am, fund reminders daily ~7am, weekly summary Sunday ~8pm, monthly summary on the 1st ~8am (script time zone).');
 }
 
 // ======================================================================
@@ -878,9 +995,12 @@ function getConfig_() {
     people: st.getRange('H2:I20').getValues()
       .filter(function (r) { return String(r[0]).trim(); })
       .map(function (r) { return { name: String(r[0]).trim(), email: String(r[1] || '').trim() }; }),
-    funds: st.getRange('L2:M10').getValues()
-      .filter(function (r) { return String(r[0]).trim() && String(r[1]).trim(); })
-      .map(function (r) { return { name: String(r[0]), category: String(r[1]) }; })
+    funds: st.getRange('L2:P10').getValues()
+      .map(function (r, i) {
+        return { name: String(r[0]).trim(), category: String(r[1]).trim(), target: Number(r[2]) || 0,
+                 targetDate: r[3] instanceof Date ? dayStr_(r[3]) : (cleanDate_(r[3]) || ''), lastReminder: String(r[4] || ''), row: i + 2 };
+      })
+      .filter(function (f) { return f.name && f.category; })
   };
 }
 
@@ -1117,7 +1237,7 @@ function buildDashboard() {
 
   // Earmarked funds (Zakat & Qurbani) from the Funds tab (rows 50-53)
   sh.getRange('A50').setValue('Earmarked funds').setFontWeight('bold').setFontSize(12);
-  sh.getRange('A51:E51').setValues([['Fund', 'Set aside to date', 'Paid out to date', 'Balance', 'Paid this month']]);
+  sh.getRange('A51:H51').setValues([['Fund', 'Set aside to date', 'Paid out to date', 'Balance', 'Paid this month', 'Target', 'Target date', 'Needed / month']]);
   const fn = [['B', 'D', '$B$2'], ['C', 'E', '$C$2']].map(function (c, i) {
     const r = 52 + i;
     const col = x => 'Funds!$' + x + '$4:$' + x + '$39';
@@ -1126,11 +1246,17 @@ function buildDashboard() {
       '=IF(A' + r + '="","",Funds!' + c[2] + '+SUMIFS(' + col(c[0]) + ',Funds!$A$4:$A$39,"<="&$B$3))',
       '=IF(A' + r + '="","",SUMIFS(' + col(c[1]) + ',Funds!$A$4:$A$39,"<="&$B$3))',
       '=IF(A' + r + '="","",B' + r + '-C' + r + ')',
-      '=IF(A' + r + '="","",SUMIFS(' + col(c[1]) + ',Funds!$A$4:$A$39,$B$3))'
+      '=IF(A' + r + '="","",SUMIFS(' + col(c[1]) + ',Funds!$A$4:$A$39,$B$3))',
+      '=IF(A' + r + '="","",IF(N(Settings!N' + (i + 2) + ')>0,Settings!N' + (i + 2) + ',""))',
+      '=IF(A' + r + '="","",IF(ISNUMBER(Settings!O' + (i + 2) + '),Settings!O' + (i + 2) + ',""))',
+      '=IF(OR(F' + r + '="",G' + r + '=""),"",IF(D' + r + '>=F' + r + ',0,IF((YEAR(G' + r + ')*12+MONTH(G' + r + '))>(YEAR(TODAY())*12+MONTH(TODAY())),' +
+        'ROUNDUP((F' + r + '-D' + r + ')/((YEAR(G' + r + ')*12+MONTH(G' + r + '))-(YEAR(TODAY())*12+MONTH(TODAY()))),0),F' + r + '-D' + r + ')))'
     ];
   });
-  sh.getRange(52, 1, 2, 5).setFormulas(fn);
-  sh.getRange('B52:E53').setNumberFormat(money);
+  sh.getRange(52, 1, 2, 8).setFormulas(fn);
+  sh.getRange('B52:F53').setNumberFormat(money);
+  sh.getRange('G52:G53').setNumberFormat('dd/mm/yyyy');
+  sh.getRange('H52:H53').setNumberFormat(money);
 
   // Latest 10 expenses
   sh.getRange('A56').setValue('Latest 10 expenses').setFontWeight('bold').setFontSize(12);
@@ -1141,7 +1267,7 @@ function buildDashboard() {
   sh.getRange('D58:D67').setNumberFormat('hh:mm');
 
   // Styling
-  ['A10:E10', 'G10:H10', 'G20:H20', 'J10:K10', 'A34:C34', 'A42:D42', 'A51:E51', 'A57:H57'].forEach(a =>
+  ['A10:E10', 'G10:H10', 'G20:H20', 'J10:K10', 'A34:C34', 'A42:D42', 'A51:H51', 'A57:H57'].forEach(a =>
     sh.getRange(a).setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff'));
   [[1, 230], [2, 110], [3, 100], [4, 100], [5, 90], [6, 160], [7, 190], [8, 110], [9, 24], [10, 50], [11, 110]]
     .forEach(w => sh.setColumnWidth(w[0], w[1]));
