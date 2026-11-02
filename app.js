@@ -77,7 +77,7 @@
   function renderAll() {
     renderNet();
     if (screen !== 'main') return;
-    renderBanner(); renderFundNote(); renderPreview(); renderQueue(); renderFavs(); renderEdit();
+    renderBanner(); renderFundNote(); renderFundChips(); renderPreview(); renderQueue(); renderFavs(); renderEdit();
     if (tab === 'history') renderHistory();
   }
   async function refresh() {
@@ -214,20 +214,37 @@
   function applyHash() {
     var h = location.hash.replace('#', '');
     if (h === 'zakat' || h === 'qurbani') { tab = 'add'; pendingFund = h; }
+    else if (/^fund-./.test(h)) { tab = 'add'; pendingFund = norm(h.slice(5)); }          // #fund-hajj for any fund you add
     else if (['add', 'history', 'month', 'reflect'].indexOf(h) >= 0) { tab = h; pendingFund = ''; }
     else return;
     if (screen === 'main') { renderTabs(); onTab(tab); tryFund(); }
   }
-  function tryFund() {
-    if (!pendingFund || screen !== 'main' || !cfg || !formReady) return;
-    var name = pendingFund, cat = '';
+  // The category linked to a fund, found by its name (the funds list comes from Settings).
+  function fundCategory(name) {
+    var cat = '';
+    if (!name) return cat;
     (cfg.funds || []).forEach(function (f) { if (norm(f.name) === name) cat = f.category; });
     if (!cat) cfg.categories.forEach(function (c) { if (!cat && norm(c).indexOf(name) >= 0) cat = c; });
-    pendingFund = '';
-    if (cat && cfg.categories.indexOf(cat) >= 0) {
-      if (editing) endEdit();
-      $('category').value = cat; syncType(); renderTabs(); $('amount').focus();
-    }
+    return cat;
+  }
+  function chooseFund(name) {
+    var cat = cfg ? fundCategory(name) : '';
+    if (!cat || cfg.categories.indexOf(cat) < 0) return false;
+    if (editing) endEdit();
+    $('category').value = cat; syncType(); renderTabs(); $('amount').focus();
+    return true;
+  }
+  function tryFund() {
+    if (!pendingFund || screen !== 'main' || !cfg || !formReady) return;
+    var name = pendingFund; pendingFund = ''; chooseFund(name);
+  }
+  // One button for each fund, so paying from any of them is a single tap.
+  function renderFundChips() {
+    var box = $('fundChips'), list = (cfg && cfg.funds) || [];
+    box.hidden = !list.length;
+    box.innerHTML = list.length ? '<span class="meta" style="align-self:center">Pay from a fund:</span>' + list.map(function (f) {
+      return '<button class="fav" type="button" data-fundchip="' + esc(f.name) + '">' + esc(f.name) + '</button>';
+    }).join('') : '';
   }
 
   // ---------- favourites ----------
@@ -663,6 +680,9 @@
   $('amount').addEventListener('input', renderPreview);
   $('date').addEventListener('change', renderPreview);
   $('monPeriod').addEventListener('change', loadMonth);
+  $('fundChips').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button'); if (b) chooseFund(norm(b.getAttribute('data-fundchip')));
+  });
   $('fundNoteX').addEventListener('click', async function () { fundNoteDay = todayStr(); await Core.kvSet('fundNoteDay', fundNoteDay); renderFundNote(); });
   window.addEventListener('hashchange', applyHash);
   $('refPeriod').addEventListener('change', loadSummary);
