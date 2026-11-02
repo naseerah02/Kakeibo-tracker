@@ -38,6 +38,7 @@ const ID_COL = 10;
 const KAKEIBO_TYPES = ['Needs', 'Wants', 'Culture', 'Extra', 'Savings'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+const MAX_FUNDS = 8;          // funds the sheet and app can hold (rows 2-9 of Settings L:P)
 const OTP_TTL = 600;          // a code is valid for 10 minutes
 const OTP_MAX_TRIES = 5;      // wrong guesses before the code is cancelled
 const OTP_MAX_REQUESTS = 3;   // codes a person can request per 10 minutes
@@ -144,48 +145,142 @@ function setup() {
     st.getRange('P2:P10').setNumberFormat('@');
   }
 
-  // Plan: monthly set-aside for each fund (part of the Savings goal)
-  if (!String(pl.getRange('H3').getValue())) {
-    pl.getRange('H3:I3').setValues([['Zakat set-aside (part of savings)', 'Qurbani set-aside (part of savings)']])
-      .setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
-    pl.getRange('H4:I39').setBackground('#fff8dc').setNumberFormat('#,##0');
-    pl.setColumnWidths(8, 2, 210);
-  }
+  // Plan: a monthly set-aside column for each fund (part of the Savings goal). Headings follow the fund names in Settings.
+  const planHeads = [], planChecks = [];
+  for (let i = 0; i < MAX_FUNDS; i++) planHeads.push('=IF(Settings!$L' + (2 + i) + '="","",Settings!$L' + (2 + i) + '&" set-aside (part of savings)")');
+  pl.getRange(3, 8, 1, MAX_FUNDS).setFormulas([planHeads]).setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
+  pl.getRange(4, 8, 36, MAX_FUNDS).setBackground('#fff8dc').setNumberFormat('#,##0');
+  pl.setColumnWidths(8, MAX_FUNDS, 190);
+  for (let r = 4; r <= 39; r++) planChecks.push(['=IF(SUM(H' + r + ':O' + r + ')>N($D' + r + '),"Set-asides are more than the savings goal","")']);
+  pl.getRange('P3').setValue('Check').setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
+  pl.getRange(4, 16, 36, 1).setFormulas(planChecks).setFontColor('#b91c1c');
+  pl.setColumnWidth(16, 260);
 
-  // Funds ledger
-  const fu = ss.getSheetByName(FUNDS) || ss.insertSheet(FUNDS);
-  if (fu.getLastRow() === 0) {
-    fu.getRange('A1').setValue('Earmarked funds (Zakat & Qurbani)').setFontSize(16).setFontWeight('bold');
-    fu.getRange('A2:C2').setValues([['Opening balance', 0, 0]]).setFontWeight('bold');
-    fu.getRange('B2:C2').setBackground('#fff8dc').setNumberFormat('#,##0');
-    fu.getRange('D2').setValue('Money you had already set aside before the first month on the Plan tab (yellow cells).');
-    fu.getRange('A3:G3').setValues([['Month', 'Zakat set-aside', 'Qurbani set-aside', 'Zakat paid', 'Qurbani paid', 'Zakat balance', 'Qurbani balance']])
-      .setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
-    const lk = col => '=N(IFERROR(ARRAYFORMULA(LOOKUP(2,1/((Plan!$A$4:$A$39<>"")*(Plan!$A$4:$A$39<=$A@)),Plan!$' + col + '$4:$' + col + '$39)),0))';
-    const paid = cell => '=SUMIFS(Expenses!$E$2:$E,Expenses!$D$2:$D,' + cell + ',Expenses!$A$2:$A,">="&$A@,Expenses!$A$2:$A,"<"&EDATE($A@,1))';
-    const rows = [];
-    for (let r = 4; r <= 39; r++) {
-      rows.push([
-        r === 4 ? '=Plan!$A$4' : '=EDATE(A' + (r - 1) + ',1)',
-        lk('H').replace(/@/g, r),
-        lk('I').replace(/@/g, r),
-        paid('Settings!$M$2').replace(/@/g, r),
-        paid('Settings!$M$3').replace(/@/g, r),
-        '=$B$2+SUM(B$4:B' + r + ')-SUM(D$4:D' + r + ')',
-        '=$C$2+SUM(C$4:C' + r + ')-SUM(E$4:E' + r + ')'
-      ]);
-    }
-    fu.getRange(4, 1, rows.length, 7).setFormulas(rows);
-    fu.getRange('A4:A39').setNumberFormat('mmm yyyy');
-    fu.getRange('B4:G39').setNumberFormat('#,##0');
-    fu.setFrozenRows(3);
-    fu.setColumnWidth(1, 120);
-    fu.setColumnWidths(2, 6, 130);
-  }
+  buildFundsSheet_(ss);
 
   ensureAuxSheets_(ss);
   buildDashboard();
   SpreadsheetApp.flush();
+}
+
+// ======================================================================
+// Funds: the ledger tab, the menu, and adding a fund
+// ======================================================================
+
+/** Column letter for a 1-based column number (1 = A). */
+function colLetter_(n) {
+  let s = '';
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+/**
+ * Builds the Funds tab from the funds listed in Settings (L:M), one column for each fund in three blocks:
+ * set-aside (B:I), paid (J:Q) and balance (R:Y). Safe to re-run: it keeps the opening balances you typed in row 2.
+ * Fund number i (Settings row i + 2) uses Plan column H + i for its monthly set-aside.
+ */
+function buildFundsSheet_(ss) {
+  const fu = ss.getSheetByName(FUNDS) || ss.insertSheet(FUNDS);
+  const opening = [];
+  for (let i = 0; i < MAX_FUNDS; i++) opening.push(0);
+  if (fu.getLastRow() >= 2) {
+    try {
+      fu.getRange(2, 2, 1, MAX_FUNDS).getValues()[0].forEach(function (v, i) { if (typeof v === 'number' && isFinite(v)) opening[i] = v; });
+    } catch (e) { /* start with zeros */ }
+  }
+  fu.clear();
+  fu.getRange('A1').setValue('Earmarked funds').setFontSize(16).setFontWeight('bold');
+  fu.getRange('A2').setValue('Opening balance').setFontWeight('bold');
+  fu.getRange(2, 2, 1, MAX_FUNDS).setValues([opening]).setBackground('#fff8dc').setNumberFormat('#,##0');
+  fu.getRange(2, 2 + MAX_FUNDS).setValue('Money already set aside before the first month on the Plan tab (yellow cells, one per fund in the order of Settings).');
+
+  const heads = [];
+  [' set-aside', ' paid', ' balance'].forEach(function (suffix) {
+    for (let i = 0; i < MAX_FUNDS; i++) heads.push('=IF(Settings!$L' + (2 + i) + '="","",Settings!$L' + (2 + i) + '&"' + suffix + '")');
+  });
+  fu.getRange('A3').setValue('Month');
+  fu.getRange(3, 2, 1, heads.length).setFormulas([heads]);
+  fu.getRange(3, 1, 1, 1 + heads.length).setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
+
+  const rows = [];
+  for (let r = 4; r <= 39; r++) {
+    const row = [r === 4 ? '=Plan!$A$4' : '=EDATE(A' + (r - 1) + ',1)'];
+    const set = [], paid = [], bal = [];
+    for (let i = 0; i < MAX_FUNDS; i++) {
+      const planCol = colLetter_(8 + i), sc = colLetter_(2 + i), pc = colLetter_(2 + MAX_FUNDS + i);
+      set.push('=IF(Settings!$L' + (2 + i) + '="",0,N(IFERROR(ARRAYFORMULA(LOOKUP(2,1/((Plan!$A$4:$A$39<>"")*(Plan!$A$4:$A$39<=$A' + r + ')),Plan!$' + planCol + '$4:$' + planCol + '$39)),0)))');
+      paid.push('=IF(Settings!$M' + (2 + i) + '="",0,SUMIFS(Expenses!$E$2:$E,Expenses!$D$2:$D,Settings!$M' + (2 + i) + ',Expenses!$A$2:$A,">="&$A' + r + ',Expenses!$A$2:$A,"<"&EDATE($A' + r + ',1)))');
+      bal.push('=' + sc + '$2+SUM(' + sc + '$4:' + sc + r + ')-SUM(' + pc + '$4:' + pc + r + ')');
+    }
+    rows.push(row.concat(set, paid, bal));
+  }
+  fu.getRange(4, 1, rows.length, 1 + 3 * MAX_FUNDS).setFormulas(rows);
+  fu.getRange('A4:A39').setNumberFormat('mmm yyyy');
+  fu.getRange(4, 2, 36, 3 * MAX_FUNDS).setNumberFormat('#,##0');
+  fu.setFrozenRows(3); fu.setFrozenColumns(1);
+  fu.setColumnWidth(1, 120);
+  fu.setColumnWidths(2, 3 * MAX_FUNDS, 120);
+}
+
+/** Adds an "Expense Tracker" menu to the sheet (it appears when the sheet is opened or reloaded). */
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('Expense Tracker')
+    .addItem('Add a fund...', 'addFund')
+    .addItem('Rebuild the dashboard', 'buildDashboard')
+    .addSeparator()
+    .addItem('Install the scheduled emails and reminders', 'installTriggers')
+    .addItem('Send a test email', 'sendTestEmail')
+    .addToUi();
+}
+
+/** Menu item: asks for a name and an emoji, then adds the fund. */
+function addFund() {
+  const ui = SpreadsheetApp.getUi();
+  const n = ui.prompt('Add a fund', 'Name of the fund, for example Hajj, Emergency or Wedding:', ui.ButtonSet.OK_CANCEL);
+  if (n.getSelectedButton() !== ui.Button.OK) return;
+  const e = ui.prompt('Add a fund', 'An emoji for it (optional), for example 🕋. Leave empty for none:', ui.ButtonSet.OK_CANCEL);
+  if (e.getSelectedButton() !== ui.Button.OK) return;
+  const res = addFund_(n.getResponseText(), e.getResponseText());
+  ui.alert(res.ok ? 'Fund added' : 'The fund was not added', res.ok ? res.message : res.error, ui.ButtonSet.OK);
+}
+
+/**
+ * Creates a fund: a category of type Savings for its payments, a row in the funds list (Settings L:M), and refreshes the
+ * Plan headings, the Funds tab and the Dashboard. The monthly set-aside is then entered on the Plan tab.
+ */
+function addFund_(name, icon) {
+  name = String(name || '').trim().slice(0, 30);
+  icon = String(icon || '').trim().slice(0, 8);
+  if (!name) return { ok: false, error: 'Enter a name for the fund.' };
+  const ss = SpreadsheetApp.getActiveSpreadsheet(), st = ss.getSheetByName(SETTINGS), cfg = getConfig_();
+  if (cfg.funds.length >= MAX_FUNDS) return { ok: false, error: 'There are already ' + MAX_FUNDS + ' funds, which is the limit.' };
+  if (cfg.funds.some(function (f) { return norm_(f.name) === norm_(name); })) return { ok: false, error: 'There is already a fund called ' + name + '.' };
+
+  const category = icon ? name + ' ' + icon : name;
+  const existing = cfg.categories.filter(function (c) { return norm_(c) === norm_(category); })[0];
+  let catNote = '';
+  if (existing) {
+    catNote = 'The category "' + existing + '" already existed, so the fund uses it. Check that its type in Settings is Savings.';
+  } else {
+    const d = st.getRange('D2:D40').getValues().map(function (r) { return String(r[0]).trim(); });
+    const free = d.indexOf('');
+    if (free < 0) return { ok: false, error: 'The category list is full (39 categories). Remove one first.' };
+    st.getRange(free + 2, 4, 1, 3).setValues([[category, 'Savings', 'No']]);
+    catNote = 'A category "' + category + '" (type Savings) was added: log payments from this fund under it.';
+  }
+  const slots = st.getRange(2, 12, MAX_FUNDS, 2).getValues();
+  let slot = -1;
+  for (let i = 0; i < slots.length; i++) { if (!String(slots[i][0]).trim() && !String(slots[i][1]).trim()) { slot = i; break; } }
+  if (slot < 0) return { ok: false, error: 'There is no free row in the funds list (Settings L2:M9).' };
+  st.getRange(slot + 2, 12, 1, 2).setValues([[name, existing || category]]);
+
+  buildFundsSheet_(ss);
+  buildDashboard();
+  return { ok: true, slot: slot, planColumn: colLetter_(8 + slot), category: existing || category,
+    message: '"' + name + '" is now fund number ' + (slot + 1) + '.\n\n' + catNote + '\n\nNext steps:\n' +
+      '1. Plan tab, column ' + colLetter_(8 + slot) + ': enter the monthly set-aside (part of the savings goal).\n' +
+      '2. Optional: a target amount and date in Settings, row ' + (slot + 2) + ', columns N and O.\n' +
+      '3. Optional: an opening balance in the Funds tab, row 2.\nThe app picks the new fund up the next time it is online.' };
 }
 
 // ======================================================================
@@ -296,7 +391,7 @@ function configFor_(auth) {
     payments: cfg.payments,
     lockSeconds: LOCK_SECONDS,
     warnAt: cfg.warnAt,
-    funds: cfg.funds.slice(0, 2).map(function (f) { return { name: f.name, category: f.category }; }),
+    funds: cfg.funds.map(function (f) { return { name: f.name, category: f.category }; }),
     fundTargets: fundTargets_(today_()),
     budget: safeBudget_(today_())
   };
@@ -612,7 +707,7 @@ function fundRow_(dateStr) {
   const fu = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FUNDS);
   if (!fu) return null;
   let hit = null, hitDay = '';
-  fu.getRange('A4:G39').getValues().forEach(function (r) {
+  fu.getRange('A4:Y39').getValues().forEach(function (r) {
     if (!(r[0] instanceof Date)) return;
     const d = dayStr_(r[0]);
     if (d <= dateStr && d > hitDay) { hit = r; hitDay = d; }
@@ -625,10 +720,10 @@ function getFundInfo_(category, dateStr) {
   try {
     const cfg = getConfig_();
     const idx = cfg.funds.findIndex(function (f) { return norm_(f.category) === norm_(category); });
-    if (idx < 0 || idx > 1) return null;
+    if (idx < 0) return null;
     const hit = fundRow_(dateStr);
     if (!hit) return null;
-    return { name: cfg.funds[idx].name, balance: Math.round(Number(hit[5 + idx]) || 0) };
+    return { name: cfg.funds[idx].name, balance: Math.round(Number(hit[17 + cfg.funds[idx].slot]) || 0) };
   } catch (err) {
     return null;
   }
@@ -638,7 +733,7 @@ function fundBalances_(dateStr) {
   try {
     const cfg = getConfig_();
     const hit = fundRow_(dateStr);
-    return cfg.funds.slice(0, 2).map(function (f, i) { return { name: f.name, balance: hit ? Math.round(Number(hit[5 + i]) || 0) : 0 }; });
+    return cfg.funds.map(function (f) { return { name: f.name, balance: hit ? Math.round(Number(hit[17 + f.slot]) || 0) : 0 }; });
   } catch (err) { return []; }
 }
 
@@ -653,7 +748,7 @@ function planRowFor_(dateStr) {
   const plan = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PLAN);
   if (!plan) return null;
   let row = null, rowDay = '';
-  plan.getRange('A4:I39').getValues().forEach(function (r) {
+  plan.getRange('A4:O39').getValues().forEach(function (r) {
     if (!(r[0] instanceof Date)) return;
     const d = dayStr_(r[0]);
     if (d <= dateStr && d > rowDay) { row = r; rowDay = d; }
@@ -675,9 +770,9 @@ function fmtDate_(ds) { return +ds.slice(8, 10) + ' ' + MONTH_NAMES[+ds.slice(5,
 function fundTargets_(dateStr) {
   try {
     const cfg = getConfig_(), hit = fundRow_(dateStr), prow = planRowFor_(dateStr);
-    return cfg.funds.slice(0, 2).map(function (f, i) {
-      const balance = hit ? Math.round(Number(hit[5 + i]) || 0) : 0;
-      const planned = prow ? Math.round(Number(prow[7 + i]) || 0) : 0;
+    return cfg.funds.map(function (f) {
+      const balance = hit ? Math.round(Number(hit[17 + f.slot]) || 0) : 0;
+      const planned = prow ? Math.round(Number(prow[7 + f.slot]) || 0) : 0;
       const out = { name: f.name, category: f.category, balance: balance, planned: planned, target: f.target, targetDate: f.targetDate, status: 'none' };
       if (!(f.target > 0) || !f.targetDate) return out;
       const days = daysBetween_(dateStr, f.targetDate);
@@ -1000,7 +1095,8 @@ function getConfig_() {
         return { name: String(r[0]).trim(), category: String(r[1]).trim(), target: Number(r[2]) || 0,
                  targetDate: r[3] instanceof Date ? dayStr_(r[3]) : (cleanDate_(r[3]) || ''), lastReminder: String(r[4] || ''), row: i + 2 };
       })
-      .filter(function (f) { return f.name && f.category; })
+      .map(function (f, i) { f.slot = i; return f; })
+      .filter(function (f) { return f.name && f.category && f.slot < MAX_FUNDS; })
   };
 }
 
@@ -1235,46 +1331,47 @@ function buildDashboard() {
   sh.getRange(43, 1, 5, 4).setFormulas(wk);
   sh.getRange('B43:D47').setNumberFormat(money);
 
-  // Earmarked funds (Zakat & Qurbani) from the Funds tab (rows 50-53)
+  // Earmarked funds from the Funds tab (rows 50-59: one row for each fund listed in Settings)
   sh.getRange('A50').setValue('Earmarked funds').setFontWeight('bold').setFontSize(12);
   sh.getRange('A51:H51').setValues([['Fund', 'Set aside to date', 'Paid out to date', 'Balance', 'Paid this month', 'Target', 'Target date', 'Needed / month']]);
-  const fn = [['B', 'D', '$B$2'], ['C', 'E', '$C$2']].map(function (c, i) {
-    const r = 52 + i;
+  const fn = [];
+  for (let i = 0; i < MAX_FUNDS; i++) {
+    const r = 52 + i, sc = colLetter_(2 + i), pc = colLetter_(2 + MAX_FUNDS + i);
     const col = x => 'Funds!$' + x + '$4:$' + x + '$39';
-    return [
+    fn.push([
       '=IF(Settings!L' + (i + 2) + '="","",Settings!L' + (i + 2) + ')',
-      '=IF(A' + r + '="","",Funds!' + c[2] + '+SUMIFS(' + col(c[0]) + ',Funds!$A$4:$A$39,"<="&$B$3))',
-      '=IF(A' + r + '="","",SUMIFS(' + col(c[1]) + ',Funds!$A$4:$A$39,"<="&$B$3))',
+      '=IF(A' + r + '="","",Funds!$' + sc + '$2+SUMIFS(' + col(sc) + ',Funds!$A$4:$A$39,"<="&$B$3))',
+      '=IF(A' + r + '="","",SUMIFS(' + col(pc) + ',Funds!$A$4:$A$39,"<="&$B$3))',
       '=IF(A' + r + '="","",B' + r + '-C' + r + ')',
-      '=IF(A' + r + '="","",SUMIFS(' + col(c[1]) + ',Funds!$A$4:$A$39,$B$3))',
+      '=IF(A' + r + '="","",SUMIFS(' + col(pc) + ',Funds!$A$4:$A$39,$B$3))',
       '=IF(A' + r + '="","",IF(N(Settings!N' + (i + 2) + ')>0,Settings!N' + (i + 2) + ',""))',
       '=IF(A' + r + '="","",IF(ISNUMBER(Settings!O' + (i + 2) + '),Settings!O' + (i + 2) + ',""))',
       '=IF(OR(F' + r + '="",G' + r + '=""),"",IF(D' + r + '>=F' + r + ',0,IF((YEAR(G' + r + ')*12+MONTH(G' + r + '))>(YEAR(TODAY())*12+MONTH(TODAY())),' +
         'ROUNDUP((F' + r + '-D' + r + ')/((YEAR(G' + r + ')*12+MONTH(G' + r + '))-(YEAR(TODAY())*12+MONTH(TODAY()))),0),F' + r + '-D' + r + ')))'
-    ];
-  });
-  sh.getRange(52, 1, 2, 8).setFormulas(fn);
-  sh.getRange('B52:F53').setNumberFormat(money);
-  sh.getRange('G52:G53').setNumberFormat('dd/mm/yyyy');
-  sh.getRange('H52:H53').setNumberFormat(money);
+    ]);
+  }
+  sh.getRange(52, 1, MAX_FUNDS, 8).setFormulas(fn);
+  sh.getRange('B52:F59').setNumberFormat(money);
+  sh.getRange('G52:G59').setNumberFormat('dd/mm/yyyy');
+  sh.getRange('H52:H59').setNumberFormat(money);
 
   // Latest 10 expenses
-  sh.getRange('A56').setValue('Latest 10 expenses').setFontWeight('bold').setFontSize(12);
-  sh.getRange('A57:H57').setValues([['Category', 'Amount', 'Date', 'Time', 'Type', 'Remarks', 'Payment', 'Person']]);
-  sh.getRange('A58').setFormula('=IFERROR(QUERY(Expenses!A2:K,"select D,E,A,C,K,G,F,I where A is not null order by A desc, C desc limit 10",0),"No expenses yet")');
-  sh.getRange('B58:B67').setNumberFormat(money);
-  sh.getRange('C58:C67').setNumberFormat('dd/mm/yyyy');
-  sh.getRange('D58:D67').setNumberFormat('hh:mm');
+  sh.getRange('A62').setValue('Latest 10 expenses').setFontWeight('bold').setFontSize(12);
+  sh.getRange('A63:H63').setValues([['Category', 'Amount', 'Date', 'Time', 'Type', 'Remarks', 'Payment', 'Person']]);
+  sh.getRange('A64').setFormula('=IFERROR(QUERY(Expenses!A2:K,"select D,E,A,C,K,G,F,I where A is not null order by A desc, C desc limit 10",0),"No expenses yet")');
+  sh.getRange('B64:B73').setNumberFormat(money);
+  sh.getRange('C64:C73').setNumberFormat('dd/mm/yyyy');
+  sh.getRange('D64:D73').setNumberFormat('hh:mm');
 
   // Styling
-  ['A10:E10', 'G10:H10', 'G20:H20', 'J10:K10', 'A34:C34', 'A42:D42', 'A51:H51', 'A57:H57'].forEach(a =>
+  ['A10:E10', 'G10:H10', 'G20:H20', 'J10:K10', 'A34:C34', 'A42:D42', 'A51:H51', 'A63:H63'].forEach(a =>
     sh.getRange(a).setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff'));
   [[1, 230], [2, 110], [3, 100], [4, 100], [5, 90], [6, 160], [7, 190], [8, 110], [9, 24], [10, 50], [11, 110]]
     .forEach(w => sh.setColumnWidth(w[0], w[1]));
   sh.setHiddenGridlines(true);
   sh.setConditionalFormatRules([
     SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0).setFontColor('#b91c1c')
-      .setRanges([sh.getRange('H8'), sh.getRange('D43:D47'), sh.getRange('D52:D53')]).build()
+      .setRanges([sh.getRange('H8'), sh.getRange('D43:D47'), sh.getRange('D52:D59')]).build()
   ]);
 
   // Charts (two columns, from column M)
