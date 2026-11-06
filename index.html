@@ -90,145 +90,159 @@
   .bar .val { min-width: 78px; text-align: right; color: var(--muted); }
   svg.chart { width: 100%; height: auto; display: block; }
   svg.chart text { fill: var(--muted); font-size: 8px; }
+  /* ---- Urdu (right to left) ---- */
+  .amount-wrap { direction: ltr; }
+  svg.chart { direction: ltr; }
+  html[lang=ur] body { font-family: "Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Noto Naskh Arabic", "Segoe UI", Roboto, Arial, sans-serif; line-height: 1.9; }
+  html[lang=ur] .pin, html[lang=ur] #amount { font-family: Roboto, "Segoe UI", Arial, sans-serif; }
+  [dir=rtl] .qrow button { margin: 6px 0 0 6px; }
+  [dir=rtl] .dot { margin-right: 0; margin-left: 4px; }
+  [dir=rtl] .bar .val { text-align: left; }
+  [dir=rtl] .alertline { text-align: start; }
+  .banner.over { }
 </style>
 </head>
 <body>
 <main class="card">
-  <div class="top"><h1>Expense Tracker</h1><span id="net" class="chip">Online</span></div>
+  <div class="top"><h1 data-i18n="app.title">Expense Tracker</h1><span id="net" class="chip">Online</span></div>
   <p class="who" id="who"></p>
 
   <!-- 1. First-time setup (only if this phone has no saved link) -->
   <section id="setup" hidden>
-    <p class="hint">Open the personal link for this phone, or fill in these two things. Run <b>showLinks()</b> in Apps Script to see them.</p>
-    <label for="sApi">Web app URL (ends in /exec)</label>
+    <p class="hint" data-i18n-html="setup.hint">Open the personal link for this phone, or fill in these two things. Run <b>showLinks()</b> in Apps Script to see them.</p>
+    <label for="sApi" data-i18n="setup.api">Web app URL (ends in /exec)</label>
     <input id="sApi" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
-    <label for="sPerson">Your name (as written in the sheet)</label>
+    <label for="sPerson" data-i18n="setup.person">Your name (as written in the sheet)</label>
     <input id="sPerson" type="text" autocomplete="off">
-    <button id="sSave" class="primary" type="button">Continue</button>
+    <button id="sSave" class="primary" type="button" data-i18n="setup.go">Continue</button>
     <p id="sMsg" class="hint"></p>
   </section>
 
   <!-- 2. Sign in with an emailed code -->
   <section id="activate" hidden>
-    <p class="hint">To keep the family sheet private, each phone signs in once with a 6-digit code sent to the email address saved for you in the sheet.</p>
-    <button id="otpSend" class="primary" type="button">Email me a code</button>
+    <p class="hint" data-i18n="act.intro">To keep the family sheet private, each phone signs in once with a 6-digit code sent to the email address saved for you in the sheet.</p>
+    <button id="otpSend" class="primary" type="button" data-i18n="act.send">Email me a code</button>
     <div id="otpBox" hidden>
-      <label for="otpCode">6-digit code</label>
+      <label for="otpCode" data-i18n="act.code">6-digit code</label>
       <input id="otpCode" class="pin" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
-      <button id="otpVerify" class="primary" type="button">Verify</button>
-      <p style="text-align:center;margin:10px 0 0"><button id="otpResend" class="small" type="button" disabled>Send again</button></p>
+      <button id="otpVerify" class="primary" type="button" data-i18n="act.verify">Verify</button>
+      <p style="text-align:center;margin:10px 0 0"><button id="otpResend" class="small" type="button" disabled data-i18n="act.resend">Send again</button></p>
     </div>
     <p id="otpMsg" class="hint"></p>
-    <p class="foot"><a id="actCancel" hidden>Cancel</a><a id="actChange">Use a different name</a></p>
+    <p class="foot"><a id="actCancel" hidden data-i18n="act.cancel">Cancel</a><a id="actChange" data-i18n="act.change">Use a different name</a></p>
   </section>
 
   <!-- 3. Create a PIN -->
   <section id="pinSet" hidden>
-    <p class="hint">Choose a PIN of 4 to 6 digits. You will enter it whenever you open the app.</p>
-    <label for="pin1">New PIN</label>
+    <p class="hint" data-i18n="pinset.hint">Choose a PIN of 4 to 6 digits. You will enter it whenever you open the app.</p>
+    <label for="pin1" data-i18n="pinset.new">New PIN</label>
     <input id="pin1" class="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
-    <label for="pin2">Repeat PIN</label>
+    <label for="pin2" data-i18n="pinset.repeat">Repeat PIN</label>
     <input id="pin2" class="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
-    <button id="pinSave" class="primary" type="button">Save PIN</button>
+    <button id="pinSave" class="primary" type="button" data-i18n="pinset.save">Save PIN</button>
     <p id="pinSetMsg" class="hint"></p>
   </section>
 
   <!-- 4. Locked -->
   <section id="lock" hidden>
-    <label for="pinIn">Enter your PIN</label>
+    <label for="pinIn" data-i18n="lock.enter">Enter your PIN</label>
     <input id="pinIn" class="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
-    <button id="pinGo" class="primary" type="button">Unlock</button>
+    <button id="pinGo" class="primary" type="button" data-i18n="lock.go">Unlock</button>
+    <p style="text-align:center;margin:10px 0 0"><button id="bioBtn" class="small" type="button" hidden data-i18n="bio.use">Use fingerprint</button></p>
+    <p id="bioMsg" class="hint"></p>
     <p id="pinMsg" class="hint"></p>
-    <p class="foot"><a id="forgotPin">Forgot PIN?</a></p>
+    <p class="foot"><a id="forgotPin" data-i18n="lock.forgot">Forgot PIN?</a></p>
   </section>
 
   <!-- 5. The app -->
   <section id="main" hidden>
     <nav class="tabs">
-      <button class="tab on" type="button" data-tab="add">Add</button>
-      <button class="tab" type="button" data-tab="history">History</button>
-      <button class="tab" type="button" data-tab="month">Month</button>
-      <button class="tab" type="button" data-tab="reflect">Reflect</button>
+      <button class="tab on" type="button" data-tab="add" data-i18n="tab.add">Add</button>
+      <button class="tab" type="button" data-tab="history" data-i18n="tab.history">History</button>
+      <button class="tab" type="button" data-tab="month" data-i18n="tab.month">Month</button>
+      <button class="tab" type="button" data-tab="reflect" data-i18n="tab.reflect">Reflect</button>
     </nav>
 
     <div id="tabAdd">
       <p class="banner" id="banner" hidden></p>
-      <div class="banner" id="fundNote" hidden><span id="fundNoteText"></span><button id="fundNoteX" class="small" type="button" style="margin-top:8px">Hide for today</button></div>
+      <div class="banner" id="limitNote" hidden></div>
+      <div class="banner" id="fundNote" hidden><span id="fundNoteText"></span><button id="fundNoteX" class="small" type="button" style="margin-top:8px" data-i18n="fundnote.hide">Hide for today</button></div>
       <div class="banner" id="editBar" hidden>
         <span id="editText"></span><br>
-        <button id="editCancel" class="small" type="button" style="margin-top:6px">Cancel</button>
-        <button id="editDelete" class="small danger" type="button" style="margin-top:6px">Delete entry</button>
+        <button id="editCancel" class="small" type="button" style="margin-top:6px" data-i18n="edit.cancel">Cancel</button>
+        <button id="editDelete" class="small danger" type="button" style="margin-top:6px" data-i18n="edit.delete">Delete entry</button>
       </div>
       <div id="fundChips" class="chips" hidden></div>
       <div id="favs" class="chips" hidden></div>
 
-      <label for="amount">Amount (<span id="cur">PKR</span>) *</label>
+      <label for="amount"><span data-i18n="f.amount">Amount</span> (<span id="cur">PKR</span>) *</label>
       <div class="amount-wrap"><span id="curTag">PKR</span><input id="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
       <p id="preview" hidden></p>
 
-      <label for="category">Category *</label>
+      <label for="category"><span data-i18n="f.category">Category</span> *</label>
       <select id="category"></select>
 
       <div class="row">
-        <div><label for="type">Kakeibo type</label><select id="type"></select></div>
-        <div><label for="payment">Payment mode</label><select id="payment"></select></div>
+        <div><label for="type" data-i18n="f.type">Kakeibo type</label><select id="type"></select></div>
+        <div><label for="payment" data-i18n="f.payment">Payment mode</label><select id="payment"></select></div>
       </div>
 
       <div class="row">
-        <div><label for="date">Date</label><input id="date" type="date"></div>
-        <div><label for="time">Time</label><input id="time" type="time"></div>
+        <div><label for="date" data-i18n="f.date">Date</label><input id="date" type="date"></div>
+        <div><label for="time" data-i18n="f.time">Time</label><input id="time" type="time"></div>
       </div>
 
-      <label for="remarks">Remarks / purpose</label>
-      <input id="remarks" type="text" maxlength="200" placeholder="e.g. Monthly groceries, lunch, cab" autocomplete="off">
+      <label for="remarks" data-i18n="f.remarks">Remarks / purpose</label>
+      <input id="remarks" type="text" maxlength="200" placeholder="e.g. Monthly groceries, lunch, cab" data-i18n-ph="f.remarks.ph" autocomplete="off">
 
-      <label for="device">Device logged</label>
+      <label for="device" data-i18n="f.device">Device logged</label>
       <input id="device" type="text" readonly>
 
-      <button id="save" class="primary" type="button">Save Record</button>
-      <p style="text-align:center;margin:10px 0 0"><button id="favSave" class="small" type="button">&#9734; Save as favourite</button></p>
+      <button id="save" class="primary" type="button" data-i18n="save.record">Save Record</button>
+      <p style="text-align:center;margin:10px 0 0"><button id="favSave" class="small" type="button" data-i18n="fav.save">&#9734; Save as favourite</button></p>
       <p id="status" role="status"></p>
-      <p style="text-align:center;margin:6px 0 0"><button id="retryCfg" class="small" type="button" hidden>Try again</button></p>
+      <p style="text-align:center;margin:6px 0 0"><button id="retryCfg" class="small" type="button" hidden data-i18n="cfg.retry">Try again</button></p>
       <p id="after"></p>
     </div>
 
     <div id="tabHistory" hidden>
-      <p class="hint">Your latest entries. Tap Edit to change one, or Delete to remove it.</p>
-      <button id="histRefresh" class="small" type="button">Refresh</button>
+      <p class="hint" data-i18n="hist.hint">Your latest entries. Tap Edit to change one, or Delete to remove it.</p>
+      <button id="histRefresh" class="small" type="button" data-i18n="hist.refresh">Refresh</button>
       <p id="histNote"></p>
       <div id="histList"></div>
     </div>
 
     <div id="tabMonth" hidden>
-      <label for="monPeriod">Month</label>
-      <select id="monPeriod"><option value="0">This month</option><option value="1">Last month</option><option value="2">2 months ago</option></select>
+      <label for="monPeriod" data-i18n="mon.label">Month</label>
+      <select id="monPeriod"><option value="0" data-i18n="mon.0">This month</option><option value="1" data-i18n="mon.1">Last month</option><option value="2" data-i18n="mon.2">2 months ago</option></select>
       <div id="monBody" style="margin-top:12px"><p class="hint">Loading your numbers...</p></div>
     </div>
 
     <div id="tabReflect" hidden>
-      <p class="hint">Kakeibo is about looking back. Take two minutes.</p>
-      <label for="refPeriod">Period</label>
+      <p class="hint" data-i18n="ref.hint">Kakeibo is about looking back. Take two minutes.</p>
+      <label for="refPeriod" data-i18n="ref.period">Period</label>
       <select id="refPeriod">
-        <option value="week0">This week</option><option value="week1">Last week</option>
-        <option value="month0">This month</option><option value="month1">Last month</option>
+        <option value="week0" data-i18n="ref.w0">This week</option><option value="week1" data-i18n="ref.w1">Last week</option>
+        <option value="month0" data-i18n="ref.m0">This month</option><option value="month1" data-i18n="ref.m1">Last month</option>
       </select>
       <div class="banner" id="refStats" style="margin-top:12px">Loading your numbers...</div>
       <label id="q1l" for="q1"></label><textarea id="q1" rows="3" maxlength="1500"></textarea>
       <label id="q2l" for="q2"></label><textarea id="q2" rows="3" maxlength="1500"></textarea>
       <label id="q3l" for="q3"></label><textarea id="q3" rows="3" maxlength="1500"></textarea>
-      <button id="refSave" class="primary" type="button">Save reflection</button>
+      <button id="refSave" class="primary" type="button" data-i18n="ref.save">Save reflection</button>
       <p id="refStatus"></p>
     </div>
 
     <div id="queueBox" hidden>
       <details id="qd"><summary id="qsum"></summary><div id="qlist"></div></details>
-      <button id="syncBtn" class="small" type="button" style="margin-top:10px">Sync now</button>
+      <button id="syncBtn" class="small" type="button" style="margin-top:10px" data-i18n="sync.now">Sync now</button>
     </div>
-    <details id="favManage" style="margin-top:14px" hidden><summary>Manage favourites</summary><div id="favList"></div></details>
+    <details id="favManage" style="margin-top:14px" hidden><summary data-i18n="fav.manage">Manage favourites</summary><div id="favList"></div></details>
   </section>
 
-  <p class="foot"><a id="installBtn" hidden>Install app</a><a id="lockNow" hidden>Lock now</a><a id="resetLink">Reset this app</a></p>
+  <p class="foot"><a id="langBtn"></a><a id="installBtn" hidden data-i18n="foot.install">Install app</a><a id="bioToggle" hidden></a><a id="lockNow" hidden data-i18n="foot.lock">Lock now</a><a id="resetLink" data-i18n="foot.reset">Reset this app</a></p>
 </main>
+<script src="i18n.js"></script>
 <script src="core.js"></script>
 <script src="app.js"></script>
 </body>

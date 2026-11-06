@@ -61,10 +61,10 @@
       return Core.api(conn, 'config').then(function (j) {
         if (j && j.ok) return { kind: 'ok', cfg: j };
         if (j && j.error === 'Not authorised') return { kind: 'auth' };
-        return { kind: 'server', text: 'Google said: ' + ((j && j.error) || 'rejected') };
+        return { kind: 'server', code: 'said', detail: (j && j.error) || 'rejected', text: 'Google said: ' + ((j && j.error) || 'rejected') };
       }, function (err) {
         if (err && /unexpected reply/.test(err.message)) {
-          return { kind: 'server', text: 'Google sent a web page instead of data. In Apps Script use Deploy > Manage deployments > Edit > New version > Deploy, and make sure access is set to Anyone.' };
+          return { kind: 'server', code: 'page', text: 'Google sent a web page instead of data. In Apps Script use Deploy > Manage deployments > Edit > New version > Deploy, and make sure access is set to Anyone.' };
         }
         return { kind: 'network' };
       });

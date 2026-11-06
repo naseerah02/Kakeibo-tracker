@@ -2,8 +2,8 @@
    Bump CACHE whenever you change any app file so phones pick up the new version. */
 importScripts('core.js');
 
-const CACHE = 'expense-app-v7';
-const SHELL = ['./', './index.html', './core.js', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'expense-app-v8';
+const SHELL = ['./', './index.html', './core.js', './app.js', './i18n.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
