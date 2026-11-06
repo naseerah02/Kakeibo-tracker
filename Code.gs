@@ -130,6 +130,11 @@ function setup() {
   if (!String(st.getRange('I1').getValue())) st.getRange('I1').setValue('Email').setFontWeight('bold');
 
   if (!String(st.getRange('A4').getValue())) st.getRange('A4:B4').setValues([['Budget warning at (% of allowance used)', 80]]);
+  if (!String(st.getRange('G1').getValue())) {   // optional monthly limit for each category (leave empty for no limit)
+    st.getRange('G1').setValue('Monthly limit').setFontWeight('bold');
+    st.getRange('G2:G40').setNumberFormat('#,##0');
+  }
+  st.getRange('G2:G40').setDataValidation(SpreadsheetApp.newDataValidation().requireNumberGreaterThan(0).setAllowInvalid(false).build());
 
   // Earmarked funds: each fund is linked to one category (payments are logged in the form as that category)
   if (!String(st.getRange('L1').getValue())) {
@@ -666,18 +671,19 @@ function planFor_(dateStr) {
  * Only flexible spending counts: fixed-cost categories and Savings-type entries are excluded.
  */
 function getBudget_(dateStr) {
-  const plan = planFor_(dateStr);
-  if (!plan) return { hasPlan: false };
-  const cfg = getConfig_();
-  const y = +dateStr.slice(0, 4), m = +dateStr.slice(5, 7), day = +dateStr.slice(8, 10);
+  const cfg = getConfig_(), rows = readExpenses_();
   const ym = dateStr.slice(0, 7);
+  const limits = categoryLimits_(rows, ym, cfg);
+  const plan = planFor_(dateStr);
+  if (!plan) return { hasPlan: false, ym: ym, limits: limits };
+  const y = +dateStr.slice(0, 4), m = +dateStr.slice(5, 7), day = +dateStr.slice(8, 10);
   const daysInMonth = new Date(y, m, 0).getDate();
   const weekIndex = Math.floor((day - 1) / 7);
   const wStart = weekIndex * 7 + 1;
   const wEnd = Math.min(wStart + 6, daysInMonth);
 
   let monthSpent = 0, weekSpent = 0;
-  readExpenses_().forEach(function (r) {
+  rows.forEach(function (r) {
     if (r.ds.slice(0, 7) !== ym || r.type === 'Savings' || cfg.fixed.indexOf(r.cat) !== -1) return;
     monthSpent += r.amt;
     const dd = +r.ds.slice(8, 10);
@@ -685,7 +691,16 @@ function getBudget_(dateStr) {
   });
   const weekAllowance = plan.free / daysInMonth * (wEnd - wStart + 1);
   return { hasPlan: true, ym: ym, week: weekIndex + 1, weekAllowance: Math.round(weekAllowance), weekLeft: Math.round(weekAllowance - weekSpent),
-           monthLeft: Math.round(plan.free - monthSpent), free: Math.round(plan.free) };
+           monthLeft: Math.round(plan.free - monthSpent), free: Math.round(plan.free), limits: limits };
+}
+
+/** Spending so far in `ym` for every category that has a monthly limit (Settings column G). Savings entries are not spending. */
+function categoryLimits_(rows, ym, cfg) {
+  return Object.keys(cfg.limits).map(function (c) {
+    let spent = 0;
+    rows.forEach(function (r) { if (r.cat === c && r.type !== 'Savings' && r.ds.slice(0, 7) === ym) spent += r.amt; });
+    return { category: c, limit: cfg.limits[c], spent: Math.round(spent) };
+  });
 }
 
 function safeBudget_(dateStr) {
@@ -923,7 +938,7 @@ function summaryFor_(p) {
   const stats = computeStats_(rows, period, dateStr, cfg, !!p.detail);
   const prev = computeStats_(rows, period, previousDate_(period, dateStr), cfg);
   const res = { ok: true, stats: stats, prev: { label: prev.label, spent: prev.spent } };
-  if (p.detail) { res.funds = fundBalances_(dateStr); res.targets = fundTargets_(today_()); }   // for the app's Month tab
+  if (p.detail) { res.funds = fundBalances_(dateStr); res.targets = fundTargets_(today_()); res.limits = categoryLimits_(rows, dateStr.slice(0, 7), cfg); }   // for the app's Month tab
   return res;
 }
 
@@ -958,7 +973,7 @@ function money_(n) {
 }
 
 /** The HTML for the weekly and monthly emails. */
-function summaryHtml_(title, s, prev, funds, monthStats, targets) {
+function summaryHtml_(title, s, prev, funds, monthStats, targets, limits) {
   const row = function (a, b) { return '<tr><td style="padding:3px 12px 3px 0">' + a + '</td><td style="padding:3px 0;text-align:right"><b>' + b + '</b></td></tr>'; };
   let h = '<div style="font-family:Arial,sans-serif;max-width:480px;color:#0f172a">';
   h += '<h2 style="margin:0 0 4px">' + title + '</h2><div style="color:#64748b;margin-bottom:12px">' + s.label + '</div>';
@@ -985,6 +1000,15 @@ function summaryHtml_(title, s, prev, funds, monthStats, targets) {
   if (funds && funds.length) h += '<p><b>Funds:</b> ' + funds.map(function (f) { return f.name + ' ' + (f.balance < 0 ? '-' : '') + money_(f.balance); }).join(' &middot; ') + '</p>';
   const tl = (targets || []).filter(function (t) { return t.target > 0 && t.targetDate; });
   if (tl.length) h += '<p style="margin-bottom:4px"><b>Fund targets</b></p>' + tl.map(fundLine_).join('<br>');
+  const warnAt = getConfig_().warnAt;
+  const lm = (limits || []).filter(function (l) { return l.limit > 0 && l.spent / l.limit * 100 >= warnAt; });
+  if (lm.length) {
+    h += '<p style="margin-bottom:4px"><b>Category limits</b></p>' + lm.map(function (l) {
+      const name = String(l.category).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      return name + ': ' + money_(l.spent) + ' of ' + money_(l.limit) + ' (' + Math.round(l.spent / l.limit * 100) + '%)' +
+        (l.spent > l.limit ? ' <span style="color:#b91c1c">over by ' + money_(l.spent - l.limit) + '</span>' : '');
+    }).join('<br>');
+  }
   const link = PWA_URL ? PWA_URL.replace(/\/?$/, '/') + '#reflect' : '';
   h += '<p style="margin-top:18px">Take two minutes to reflect: what went well, and what will you do differently?' +
     (link ? ' <a href="' + link + '">Open the app</a>' : '') + '</p></div>';
@@ -1003,7 +1027,7 @@ function sendWeeklySummary() {
   const wk = computeStats_(rows, 'week', today, cfg);
   const prev = computeStats_(rows, 'week', previousDate_('week', today), cfg);
   const mo = computeStats_(rows, 'month', today, cfg);
-  sendEmail_('Weekly money summary: ' + wk.label, summaryHtml_('Your weekly summary', wk, prev, fundBalances_(today), mo, fundTargets_(today)));
+  sendEmail_('Weekly money summary: ' + wk.label, summaryHtml_('Your weekly summary', wk, prev, fundBalances_(today), mo, fundTargets_(today), categoryLimits_(rows, today.slice(0, 7), cfg)));
 }
 
 /** Scheduled on the 1st of the month: the month that just ended. */
@@ -1012,7 +1036,7 @@ function sendMonthlySummary() {
   const last = previousDate_('month', today_());
   const mo = computeStats_(rows, 'month', last, cfg);
   const prev = computeStats_(rows, 'month', previousDate_('month', last), cfg);
-  sendEmail_('Monthly money summary: ' + mo.label, summaryHtml_('Your monthly summary', mo, prev, fundBalances_(last), null, fundTargets_(today_())));
+  sendEmail_('Monthly money summary: ' + mo.label, summaryHtml_('Your monthly summary', mo, prev, fundBalances_(last), null, fundTargets_(today_()), categoryLimits_(rows, last.slice(0, 7), cfg)));
 }
 
 // ======================================================================
@@ -1073,7 +1097,7 @@ function installTriggers() {
 
 function getConfig_() {
   const st = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SETTINGS);
-  const catRows = st.getRange('D2:F40').getValues().filter(function (r) { return String(r[0]).trim(); });
+  const catRows = st.getRange('D2:G40').getValues().filter(function (r) { return String(r[0]).trim(); });
   const types = {};
   catRows.forEach(function (r) {
     const t = KAKEIBO_TYPES.find(function (x) { return x.toLowerCase() === String(r[1]).trim().toLowerCase(); });
@@ -1084,6 +1108,7 @@ function getConfig_() {
     warnAt: (function (v) { return v >= 50 && v <= 99 ? Math.round(v) : 80; })(Number(st.getRange('B4').getValue())),
     summaryEmails: String(st.getRange('B2').getValue() || '').split(/[,;\s]+/).filter(function (x) { return x.indexOf('@') > 0; }),
     categories: catRows.map(function (r) { return String(r[0]); }),
+    limits: (function () { const o = {}; catRows.forEach(function (r) { if (Number(r[3]) > 0) o[String(r[0])] = Number(r[3]); }); return o; })(),
     types: types,
     fixed: catRows.filter(function (r) { return String(r[2]).trim().toLowerCase() === 'yes'; }).map(function (r) { return String(r[0]); }),
     payments: st.getRange('J2:J40').getValues().flat().filter(String),
@@ -1255,7 +1280,7 @@ function buildDashboard() {
   sh.getRange('H8').setFontWeight('bold');
 
   // By category (rows 11-30)
-  sh.getRange('A10:E10').setValues([['Category', 'Spent', 'Share', 'Type', 'Fixed?']]);
+  sh.getRange('A10:F10').setValues([['Category', 'Spent', 'Share', 'Type', 'Fixed?', 'Limit']]);
   const cat = [];
   for (let r = 11; r <= 30; r++) {
     const k = r - 9;
@@ -1264,10 +1289,12 @@ function buildDashboard() {
       '=IF(A' + r + '="","",SUMIFS(' + A + ',' + C + ',A' + r + ',' + inMonth + '))',
       '=IF(OR(B' + r + '="",$B$4=0),"",B' + r + '/$B$4)',
       '=IF(A' + r + '="","",Settings!E' + k + ')',
-      '=IF(A' + r + '="","",Settings!F' + k + ')'
+      '=IF(A' + r + '="","",Settings!F' + k + ')',
+      '=IF(A' + r + '="","",IF(N(Settings!G' + k + ')>0,Settings!G' + k + ',""))'
     ]);
   }
-  sh.getRange(11, 1, cat.length, 5).setFormulas(cat);
+  sh.getRange(11, 1, cat.length, 6).setFormulas(cat);
+  sh.getRange('F11:F30').setNumberFormat(money);
   sh.getRange('B11:B30').setNumberFormat(money);
   sh.getRange('C11:C30').setNumberFormat('0%');
 
@@ -1364,14 +1391,16 @@ function buildDashboard() {
   sh.getRange('D64:D73').setNumberFormat('hh:mm');
 
   // Styling
-  ['A10:E10', 'G10:H10', 'G20:H20', 'J10:K10', 'A34:C34', 'A42:D42', 'A51:H51', 'A63:H63'].forEach(a =>
+  ['A10:F10', 'G10:H10', 'G20:H20', 'J10:K10', 'A34:C34', 'A42:D42', 'A51:H51', 'A63:H63'].forEach(a =>
     sh.getRange(a).setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff'));
   [[1, 230], [2, 110], [3, 100], [4, 100], [5, 90], [6, 160], [7, 190], [8, 110], [9, 24], [10, 50], [11, 110]]
     .forEach(w => sh.setColumnWidth(w[0], w[1]));
   sh.setHiddenGridlines(true);
   sh.setConditionalFormatRules([
     SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0).setFontColor('#b91c1c')
-      .setRanges([sh.getRange('H8'), sh.getRange('D43:D47'), sh.getRange('D52:D59')]).build()
+      .setRanges([sh.getRange('H8'), sh.getRange('D43:D47'), sh.getRange('D52:D59')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=AND(ISNUMBER($F11),$B11>$F11)').setFontColor('#b91c1c').setBold(true)
+      .setRanges([sh.getRange('B11:B30')]).build()
   ]);
 
   // Charts (two columns, from column M)

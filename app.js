@@ -1,13 +1,12 @@
-/* The Android app: sign-in, PIN lock, Add / History / Reflect, favourites, offline queue. */
+/* The Android app: sign-in, PIN and fingerprint lock, Add / History / Month / Reflect, favourites, funds,
+   category limits, English and Urdu, and the offline queue. */
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+  var t = I18N.t, tn = I18N.tn;
   var SCREENS = ['setup', 'activate', 'pinSet', 'lock', 'main'];
-  var REFLECT_Q = {
-    Weekly: ['What went well with money this week?', 'What was an unnecessary spend, and why?', 'One thing I will do better next week'],
-    Monthly: ['How did I do against my savings goal? What helped or got in the way?', 'Which Wants or Extra spending can I reduce?', 'My plan for next month']
-  };
+  var KAKEIBO = ['Needs', 'Wants', 'Culture', 'Extra'];
 
   var conn = null;          // { api, person, token, deviceId, device }
   var deviceId = '';
@@ -15,9 +14,10 @@
   var queue = [];           // entries and reflections saved on this phone, not yet in the sheet
   var recent = [];          // last loaded History from Google
   var pinRec = null;        // { salt, hash, len, fails, until }
-  var favs = [], prefs = {};
+  var bioRec = null, bioOk = false, bioBusy = false;   // fingerprint: saved credential, available on this phone, prompt open
+  var favs = [], prefs = {}, lang = 'en';
   var locked = true, hiddenAt = 0, forceActivate = false, forgot = false;
-  var screen = '', tab = 'add', editing = null, formReady = false;
+  var screen = '', lastScreen = '', tab = 'add', editing = null, formReady = false;
   var syncing = false, cfgMsg = '', histNote = '', installPrompt = null, resendTimer = null, fundNoteDay = '';
 
   // ---------- small helpers ----------
@@ -37,47 +37,59 @@
   }
   function setNow() { var d = new Date(); $('date').value = todayStr(); $('time').value = pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function cur() { return (cfg && cfg.currency) || 'PKR'; }
-  function fmt(n) { return Math.abs(Math.round(n)).toLocaleString(); }
+  function fmt(n) { return Math.abs(Math.round(n)).toLocaleString('en-US'); }
   function money(n) { return cur() + ' ' + fmt(n); }
   function paint(el, text, kind) { el.textContent = text; el.className = kind || ''; }
   function say(text, kind) { paint($('status'), text, kind); }
   // Shows a message on whichever tab is open
   function msg(text, kind) { paint(tab === 'history' ? $('histNote') : tab === 'reflect' ? $('refStatus') : $('status'), text, kind); }
+  // Messages that come back from Google, in the current language when we have a translation
+  function errText(m) { m = String(m == null ? '' : m); return I18N.has('err.' + m) ? t('err.' + m) : m; }
+  function typeLabel(v) { return I18N.STR.en['type.' + v] !== undefined ? t('type.' + v) : v; }
+  function lvClass(lev) { return lev === 2 ? 'over' : 'warn'; }
+  function b64(buf) { var s = '', a = new Uint8Array(buf); for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+  function unb64(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; var bin = atob(s), out = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
 
   // ---------- screens ----------
   function route() {
     var s = !conn ? 'setup' : (!conn.token || forceActivate) ? 'activate' : !pinRec ? 'pinSet' : locked ? 'lock' : 'main';
     SCREENS.forEach(function (n) { $(n).hidden = n !== s; });
     screen = s;
-    var titles = { setup: 'First-time setup', activate: 'Sign in', pinSet: 'Create your PIN', lock: 'Locked' };
-    $('who').textContent = s === 'main' ? 'Logging as ' + conn.person : (titles[s] + (conn && conn.person && s !== 'setup' ? ' \u00b7 ' + conn.person : ''));
+    var titles = { setup: 'who.setup', activate: 'who.activate', pinSet: 'who.pinSet', lock: 'who.lock' };
+    $('who').textContent = s === 'main' ? t('who.main', { name: conn.person }) : (t(titles[s]) + (conn && conn.person && s !== 'setup' ? ' \u00b7 ' + conn.person : ''));
     $('actCancel').hidden = !forgot;
     $('lockNow').hidden = !(s === 'main' && pinRec);
-    renderNet();
-    if (s === 'lock') { $('pinIn').value = ''; setTimeout(function () { $('pinIn').focus(); }, 50); }
+    $('langBtn').textContent = t('lang.other');
+    renderNet(); renderBioUi();
+    if (s === 'lock') {
+      $('pinIn').value = '';
+      setTimeout(function () { $('pinIn').focus(); }, 50);
+      if (lastScreen !== 'lock') { $('bioMsg').textContent = ''; if (bioRec && bioOk) setTimeout(bioUnlock, 350); }   // ask for the fingerprint as soon as the lock appears
+    }
     if (s === 'main') { renderTabs(); renderAll(); }
+    lastScreen = s;
   }
   function renderNet() {
     var n = $('net');
-    n.textContent = navigator.onLine ? 'Online' : 'Offline';
+    n.textContent = navigator.onLine ? t('online') : t('offline');
     n.className = 'chip' + (navigator.onLine ? '' : ' off');
   }
   function renderTabs() {
-    ['add', 'history', 'month', 'reflect'].forEach(function (t) {
-      $('tab' + t.charAt(0).toUpperCase() + t.slice(1)).hidden = t !== tab;
+    ['add', 'history', 'month', 'reflect'].forEach(function (x) {
+      $('tab' + x.charAt(0).toUpperCase() + x.slice(1)).hidden = x !== tab;
     });
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) { b.className = 'tab' + (b.getAttribute('data-tab') === tab ? ' on' : ''); });
   }
-  function onTab(t) {
-    if (t === 'history') { renderHistory(); loadHistory(); }
-    if (t === 'month') loadMonth();
-    if (t === 'reflect') loadSummary();
+  function onTab(x) {
+    if (x === 'history') { renderHistory(); loadHistory(); }
+    if (x === 'month') loadMonth();
+    if (x === 'reflect') loadSummary();
   }
-  function switchTab(t) { tab = t; renderTabs(); onTab(t); }
+  function switchTab(x) { tab = x; renderTabs(); onTab(x); }
   function renderAll() {
     renderNet();
     if (screen !== 'main') return;
-    renderBanner(); renderFundNote(); renderFundChips(); renderPreview(); renderQueue(); renderFavs(); renderEdit();
+    renderBanner(); renderLimitNote(); renderFundNote(); renderFundChips(); renderPreview(); renderQueue(); renderFavs(); renderEdit();
     if (tab === 'history') renderHistory();
   }
   async function refresh() {
@@ -85,6 +97,16 @@
     queue = await Core.qAll();
     recent = (await Core.kvGet('recent')) || [];
     renderAll();
+  }
+
+  // ---------- language ----------
+  function applyLang() {
+    I18N.setLang(lang);
+    say('', ''); $('otpMsg').textContent = ''; $('pinMsg').textContent = ''; $('bioMsg').textContent = '';
+    if (cfg) buildForm();
+    $('amount').placeholder = '0.00';
+    route();
+    if (screen === 'main') onTab(tab);
   }
 
   // ---------- budget banner (works offline: last known figures minus entries not yet synced) ----------
@@ -102,7 +124,7 @@
     });
     return { week: b.week, weekLeft: wl, monthLeft: ml, pending: pending };
   }
-  function leftHtml(n) { return n < 0 ? '<b class="neg">over by ' + money(n) + '</b>' : '<b>' + money(n) + '</b> left'; }
+  function leftHtml(n) { return n < 0 ? t('over.by', { amt: money(n) }) : t('left.of', { amt: money(n) }); }
 
   // How much of an allowance is used, and whether that deserves a warning: 0 = fine, 1 = getting close, 2 = over.
   function level(allowance, left) {
@@ -117,13 +139,13 @@
   function alertLines(weekLeft, monthLeft) {
     var lv = budgetLevels(weekLeft, monthLeft), out = [];
     [['week', lv.week], ['month', lv.month]].forEach(function (x) {
-      if (x[1].lev === 2) out.push({ lev: 2, text: 'Over this ' + x[0] + "'s allowance" });
-      else if (x[1].lev === 1) out.push({ lev: 1, text: x[1].pct + '% of this ' + x[0] + "'s allowance used" });
+      if (x[1].lev === 2) out.push({ lev: 2, text: t('alert.over.' + x[0]) });
+      else if (x[1].lev === 1) out.push({ lev: 1, text: t('alert.near.' + x[0], { pct: x[1].pct }) });
     });
     return out;
   }
   function alertHtml(lines) {
-    return lines.map(function (l) { return '<span class="alertline ' + (l.lev === 2 ? 'over' : 'warn') + '">' + (l.lev === 2 ? '\u26a0 ' : '') + esc(l.text) + '</span>'; }).join('');
+    return lines.map(function (l) { return '<span class="alertline ' + lvClass(l.lev) + '">' + (l.lev === 2 ? '\u26a0 ' : '') + esc(l.text) + '</span>'; }).join('');
   }
   function renderBanner() {
     var est = estimate(), box = $('banner');
@@ -131,26 +153,61 @@
     var lines = alertLines(est.weekLeft, est.monthLeft);
     var worst = lines.reduce(function (m, l) { return Math.max(m, l.lev); }, 0);
     box.className = 'banner' + (worst === 2 ? ' over' : worst === 1 ? ' warn' : '');
-    var html = 'Week ' + est.week + ': ' + leftHtml(est.weekLeft) + ' &middot; Month: ' + leftHtml(est.monthLeft) + alertHtml(lines);
-    if (est.pending) html += '<small>Estimate: ' + est.pending + ' entr' + (est.pending === 1 ? 'y' : 'ies') + ' not synced yet</small>';
-    else if (!navigator.onLine) html += '<small>Offline: last known figures</small>';
+    var html = t('banner.line', { week: est.week, w: leftHtml(est.weekLeft), m: leftHtml(est.monthLeft) }) + alertHtml(lines);
+    if (est.pending) html += tn('banner.pending', est.pending);
+    else if (!navigator.onLine) html += t('banner.offline');
     box.innerHTML = html; box.hidden = false;
+  }
+
+  // ---------- category limits (Settings column G) ----------
+  // Spending this month for each category that has a limit: what Google knows, plus entries still waiting on this phone,
+  // plus (optionally) an entry that is being typed.
+  function limitList(extraCat, extraAmt) {
+    var b = cfg && cfg.budget, out = [];
+    if (!b || !b.limits) return out;
+    var warn = cfg.warnAt || 80;
+    b.limits.forEach(function (l) {
+      if (!(l.limit > 0)) return;
+      var spent = l.spent;
+      queue.forEach(function (e) {
+        if (e.failed || e.kind === 'reflection') return;
+        var p = e.payload;
+        if (p.category === l.category && p.type !== 'Savings' && String(p.date).slice(0, 7) === b.ym) spent += p.amount;
+      });
+      if (extraCat === l.category) spent += extraAmt;
+      var pct = Math.round(spent / l.limit * 100);
+      out.push({ category: l.category, limit: l.limit, spent: spent, pct: pct, lev: spent > l.limit ? 2 : pct >= warn ? 1 : 0 });
+    });
+    return out;
+  }
+  function limitAlerts(list) {
+    return list.filter(function (l) { return l.lev > 0; }).sort(function (a, b) { return b.pct - a.pct; }).slice(0, 3).map(function (l) {
+      return { lev: l.lev, text: l.lev === 2 ? t('limit.note.over', { cat: l.category, limit: money(l.limit), amt: money(l.spent - l.limit) })
+                                               : t('limit.note.near', { cat: l.category, pct: l.pct, limit: money(l.limit) }) };
+    });
+  }
+  function renderLimitNote() {
+    var box = $('limitNote'), items = limitAlerts(limitList());
+    if (!items.length) { box.hidden = true; return; }
+    var worst = items.reduce(function (m, i) { return Math.max(m, i.lev); }, 0);
+    box.className = 'banner ' + lvClass(worst);
+    box.innerHTML = alertHtml(items);
+    box.hidden = false;
   }
 
   // ---------- fund targets: reminders on the Add tab ----------
   // Shown only when a fund needs attention: behind within 90 days, on track in the last week, or the date just passed.
   function fundAlerts() {
     var out = [], today = todayStr();
-    ((cfg && cfg.fundTargets) || []).forEach(function (t) {
-      if (!(t.target > 0) || !t.targetDate || t.status === 'reached' || t.status === 'none' || t.status === 'past') return;
-      var days = daysBetween(today, t.targetDate);
+    ((cfg && cfg.fundTargets) || []).forEach(function (f) {
+      if (!(f.target > 0) || !f.targetDate || f.status === 'reached' || f.status === 'none' || f.status === 'past') return;
+      var days = daysBetween(today, f.targetDate);
       if (days < 0) {
-        if (days >= -30) out.push({ lev: 2, text: t.name + ': the target date has passed and ' + money(t.remaining) + ' is still short.' });
-      } else if (t.status === 'behind' && days <= 90) {
-        out.push({ lev: days <= 30 ? 2 : 1, text: t.name + ': ' + days + ' day' + (days === 1 ? '' : 's') + ' to go. Set aside ' + money(t.needed) +
-          ' a month (plan: ' + money(t.planned) + ') to reach ' + money(t.target) + '.' });
-      } else if (t.status === 'on-track' && days <= 7) {
-        out.push({ lev: 1, text: t.name + ': ' + days + ' day' + (days === 1 ? '' : 's') + ' to go. On track: have ' + money(t.target) + ' ready.' });
+        if (days >= -30) out.push({ lev: 2, text: t('fund.passed', { name: f.name, amt: money(f.remaining) }) });
+      } else if (f.status === 'behind' && days <= 90) {
+        out.push({ lev: days <= 30 ? 2 : 1, text: tn('fund.behind', days, { name: f.name, days: days, needed: money(f.needed), planned: money(f.planned), target: money(f.target) }) });
+      } else if (f.status === 'on-track' && days <= 7) {
+        out.push({ lev: 1, text: tn('fund.track', days, { name: f.name, days: days, target: money(f.target) }) });
       }
     });
     return out;
@@ -159,42 +216,56 @@
     var box = $('fundNote'), items = fundAlerts();
     if (!items.length || fundNoteDay === todayStr()) { box.hidden = true; return; }
     var worst = items.reduce(function (m, i) { return Math.max(m, i.lev); }, 0);
-    box.className = 'banner ' + (worst === 2 ? 'over' : 'warn');
-    $('fundNoteText').innerHTML = items.map(function (i) { return '<span class="alertline ' + (i.lev === 2 ? 'over' : 'warn') + '">' + esc(i.text) + '</span>'; }).join('');
+    box.className = 'banner ' + lvClass(worst);
+    $('fundNoteText').innerHTML = items.map(function (i) { return '<span class="alertline ' + lvClass(i.lev) + '">' + esc(i.text) + '</span>'; }).join('');
     box.hidden = false;
   }
 
-  // Under the amount: what the week and month would look like if you save this entry.
+  // Under the amount: what the week, the month and the category limit would look like if you save this entry.
   function renderPreview() {
     var box = $('preview'), est = estimate();
     var amount = parseFloat(($('amount').value || '').replace(/,/g, ''));
-    if (editing || !est || !(amount > 0) || $('type').value === 'Savings' || (cfg.fixed || []).indexOf($('category').value) !== -1) { box.hidden = true; return; }
-    var b = cfg.budget, date = $('date').value || todayStr();
-    if (String(date).slice(0, 7) !== b.ym) { box.hidden = true; return; }
-    var wl = est.weekLeft, ml = est.monthLeft - amount;
-    if (weekOf(date) === b.week) wl -= amount;
-    var worst = alertLines(wl, ml).reduce(function (m, l) { return Math.max(m, l.lev); }, 0);
+    if (editing || !cfg || !(amount > 0)) { box.hidden = true; return; }
+    var b = cfg.budget, date = $('date').value || todayStr(), cat = $('category').value, lines = [], worst = 0;
+    var spending = $('type').value !== 'Savings';
+    var sameMonth = !!b && String(date).slice(0, 7) === b.ym;
+    if (est && spending && sameMonth && (cfg.fixed || []).indexOf(cat) === -1) {
+      var wl = est.weekLeft, ml = est.monthLeft - amount;
+      if (weekOf(date) === b.week) wl -= amount;
+      worst = Math.max(worst, alertLines(wl, ml).reduce(function (m, l) { return Math.max(m, l.lev); }, 0));
+      lines.push(t('preview.after', { w: leftHtml(wl), m: leftHtml(ml) }));
+    }
+    if (spending && sameMonth) {
+      var lim = limitList(cat, amount).filter(function (l) { return l.category === cat; })[0];
+      if (lim) {
+        worst = Math.max(worst, lim.lev);
+        lines.push(lim.spent > lim.limit
+          ? t('limit.preview.over', { cat: esc(cat), limit: money(lim.limit), amt: money(lim.spent - lim.limit) })
+          : t('limit.preview.left', { cat: esc(cat), limit: money(lim.limit), amt: money(lim.limit - lim.spent) }));
+      }
+    }
+    if (!lines.length) { box.hidden = true; return; }
     box.className = worst === 2 ? 'err' : worst === 1 ? 'warn' : 'hint';
-    box.innerHTML = 'After this: week ' + leftHtml(wl) + ' &middot; month ' + leftHtml(ml);
+    box.innerHTML = lines.join('<br>');
     box.hidden = false;
   }
 
   // ---------- the Add form ----------
-  function fill(sel, items) {
+  function fill(sel, items, labelOf) {
     var keep = sel.value; sel.innerHTML = '';
-    (items || []).forEach(function (t) { var o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o); });
+    (items || []).forEach(function (v) { var o = document.createElement('option'); o.value = v; o.textContent = labelOf ? labelOf(v) : v; sel.appendChild(o); });
     if (keep && (items || []).indexOf(keep) >= 0) sel.value = keep;
   }
-  function ensureOption(sel, value) {
+  function ensureOption(sel, value, labelOf) {
     if (!value) return;
     for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === value) return;
-    var o = document.createElement('option'); o.value = value; o.textContent = value; sel.appendChild(o);
+    var o = document.createElement('option'); o.value = value; o.textContent = labelOf ? labelOf(value) : value; sel.appendChild(o);
   }
   function syncType() { if (cfg && cfg.types) $('type').value = cfg.types[$('category').value] || 'Extra'; renderPreview(); }
   function buildForm() {
     if (!cfg) return;
     $('cur').textContent = cur(); $('curTag').textContent = cur();
-    fill($('category'), cfg.categories); fill($('type'), cfg.kakeiboTypes); fill($('payment'), cfg.payments);
+    fill($('category'), cfg.categories); fill($('type'), cfg.kakeiboTypes, typeLabel); fill($('payment'), cfg.payments);
     if (!formReady) {   // first time only: start from the last category and payment mode you used
       if (prefs.category && cfg.categories.indexOf(prefs.category) >= 0) $('category').value = prefs.category;
       if (prefs.payment && cfg.payments.indexOf(prefs.payment) >= 0) $('payment').value = prefs.payment;
@@ -242,7 +313,7 @@
   function renderFundChips() {
     var box = $('fundChips'), list = (cfg && cfg.funds) || [];
     box.hidden = !list.length;
-    box.innerHTML = list.length ? '<span class="meta" style="align-self:center">Pay from a fund:</span>' + list.map(function (f) {
+    box.innerHTML = list.length ? '<span class="meta" style="align-self:center">' + esc(t('fund.pay')) + '</span>' + list.map(function (f) {
       return '<button class="fav" type="button" data-fundchip="' + esc(f.name) + '">' + esc(f.name) + '</button>';
     }).join('') : '';
   }
@@ -257,7 +328,7 @@
     $('favManage').hidden = !favs.length;
     $('favList').innerHTML = favs.map(function (f) {
       return '<div class="qrow"><b>' + esc(f.label) + '</b> <span class="meta">' + esc(f.category) + (f.amount ? ' &middot; ' + esc(fmt(f.amount)) : '') +
-        '</span><br><button class="small danger" type="button" data-favdel="' + esc(f.id) + '">Delete</button></div>';
+        '</span><br><button class="small danger" type="button" data-favdel="' + esc(f.id) + '">' + esc(t('fav.delete')) + '</button></div>';
     }).join('');
   }
   function applyFav(f) {
@@ -276,15 +347,15 @@
     if (!queue.length) { box.hidden = true; return; }
     box.hidden = false;
     var failed = queue.filter(function (e) { return e.failed; }).length;
-    $('qsum').textContent = (queue.length - failed) + ' waiting to sync' + (failed ? ', ' + failed + ' need attention' : '');
+    $('qsum').textContent = t('q.waiting', { n: queue.length - failed }) + (failed ? t('q.failed', { f: failed }) : '');
     $('qlist').innerHTML = queue.map(function (e) {
       var p = e.payload, head = e.kind === 'reflection'
-        ? '<b>Reflection</b> &middot; ' + esc(p.kind) : '<b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.category);
+        ? t('q.reflection', { kind: esc(t('kind.' + p.kind)) }) : '<b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.category);
       var meta = e.kind === 'reflection' ? esc(p.date) : esc(p.date) + ' ' + esc(p.time) + (p.remarks ? ' &middot; ' + esc(p.remarks) : '');
       return '<div class="qrow"><div>' + head + '</div><div class="meta">' + meta + '</div>' +
-        (e.failed ? '<div class="bad">Not saved: ' + esc(e.error) + '</div><button class="small" data-act="retry" data-id="' + esc(e.id) + '">Retry</button>'
-                  : '<div class="meta">Waiting to sync</div>') +
-        '<button class="small" data-act="del" data-id="' + esc(e.id) + '">Delete</button></div>';
+        (e.failed ? '<div class="bad">' + esc(t('q.notSaved', { err: errText(e.error) })) + '</div><button class="small" data-act="retry" data-id="' + esc(e.id) + '">' + esc(t('q.retry')) + '</button>'
+                  : '<div class="meta">' + esc(t('q.waitItem')) + '</div>') +
+        '<button class="small" data-act="del" data-id="' + esc(e.id) + '">' + esc(t('q.delete')) + '</button></div>';
     }).join('');
   }
 
@@ -303,21 +374,21 @@
       $('retryCfg').hidden = true;
       if (cfgMsg && $('status').textContent === cfgMsg) { say('', ''); cfgMsg = ''; }
     } else if (r.kind === 'auth') {
-      needAuth('This phone needs to sign in again. Your unsent entries are safe.');
+      needAuth(t('cfg.auth'));
     } else if (r.kind === 'server') {
-      configProblem(r.text, false);
+      configProblem(r.code === 'page' ? t('cfg.page') : t('cfg.said', { err: errText(r.detail) }), false);
     } else if (navigator.onLine) {
-      configProblem('Could not reach your Google script. Check the link (it must end in /exec) and that access is set to Anyone.', false);
+      configProblem(t('cfg.unreachable'), false);
     } else {
-      configProblem('Offline. Connect once to load your categories.', true);
+      configProblem(t('cfg.offline'), true);
     }
   }
 
   function noteFor(res) {
     if (!res) return '';
-    if (res.fund) return 'Paid from your ' + esc(res.fund.name) + ' fund: ' + (res.fund.balance < 0 ? 'overdrawn by <b>' + money(res.fund.balance) + '</b>' : 'balance now <b>' + money(res.fund.balance) + '</b>');
-    if (res.saving) return 'Savings / investment: not counted as spending.';
-    if (res.fixed) return 'Fixed cost: not counted against your weekly allowance.';
+    if (res.fund) return t('note.fund', { name: esc(res.fund.name), state: res.fund.balance < 0 ? t('note.fund.over', { amt: money(res.fund.balance) }) : t('note.fund.ok', { amt: money(res.fund.balance) }) });
+    if (res.saving) return t('note.saving');
+    if (res.fixed) return t('note.fixed');
     return '';
   }
 
@@ -325,19 +396,24 @@
     if (syncing || !conn) return;
     syncing = true;
     try {
+      var touched = {};
+      queue.forEach(function (e) { if (!e.failed && e.kind !== 'reflection') touched[e.payload.category] = 1; });
       var r = await Core.syncQueue();
       await refresh();
-      if (r.auth) { await needAuth('This phone needs to sign in again. Your unsent entries are safe.'); return; }
+      if (r.auth) { await needAuth(t('cfg.auth')); return; }
       if (screen !== 'main') return;
-      if (r.failed) say(r.failed + ' entr' + (r.failed === 1 ? 'y needs' : 'ies need') + ' attention', 'err');
-      else if (r.waiting) say('Saved on this phone: ' + r.waiting + ' waiting to sync' + (r.problem && navigator.onLine ? ' (' + r.problem + ')' : ''), 'warn');
+      if (r.failed) say(tn('sync.failed', r.failed), 'err');
+      else if (r.waiting) say(t('sync.waiting', { n: r.waiting }) + (r.problem && navigator.onLine ? t('sync.problem', { p: errText(r.problem) }) : ''), 'warn');
       else if (r.synced) {
-        say('Synced to your sheet \u2713', 'ok');
-        var est = estimate(), warn = est ? alertHtml(alertLines(est.weekLeft, est.monthLeft)) : '';
-        $('after').innerHTML = noteFor(r.lastRes) + (warn ? (noteFor(r.lastRes) ? '<br>' : '') + warn : '');
+        say(t('sync.done'), 'ok');
+        var est = estimate(), parts = [];
+        var note = noteFor(r.lastRes); if (note) parts.push(note);
+        var warn = est ? alertHtml(alertLines(est.weekLeft, est.monthLeft)) : ''; if (warn) parts.push(warn);
+        var lw = alertHtml(limitAlerts(limitList().filter(function (l) { return touched[l.category]; }))); if (lw) parts.push(lw);
+        $('after').innerHTML = parts.join(note && (warn || lw) ? '<br>' : '');
       }
     } catch (e) {
-      say('Sync problem: ' + (e && e.message || e), 'err');
+      say(t('sync.error', { m: (e && e.message || e) }), 'err');
     } finally { syncing = false; }
   }
 
@@ -354,50 +430,50 @@
     if (conn) { conn.token = ''; await Core.kvSet('conn', conn); }
     forgot = false; forceActivate = false;
     $('otpBox').hidden = true; $('otpSend').hidden = false;
-    $('otpMsg').textContent = text || 'This phone needs to sign in.';
+    $('otpMsg').textContent = text || t('auth.default');
     route();
   }
 
   // ---------- sign-in with an emailed code ----------
   function startResend() {
     var n = 60, btn = $('otpResend');
-    btn.disabled = true; btn.textContent = 'Send again (60)';
+    btn.disabled = true; btn.textContent = t('otp.resend.n', { n: 60 });
     clearInterval(resendTimer);
     resendTimer = setInterval(function () {
-      n--; btn.textContent = n > 0 ? 'Send again (' + n + ')' : 'Send again';
+      n--; btn.textContent = n > 0 ? t('otp.resend.n', { n: n }) : t('act.resend');
       if (n <= 0) { btn.disabled = false; clearInterval(resendTimer); }
     }, 1000);
   }
   async function sendCode() {
-    $('otpSend').disabled = true; $('otpMsg').textContent = 'Sending...';
+    $('otpSend').disabled = true; $('otpMsg').textContent = t('otp.sending');
     try {
       var r = await Core.api(conn, 'otp_request', { person: conn.person });
       if (r && r.ok) {
         $('otpBox').hidden = false; $('otpSend').hidden = true;
-        $('otpMsg').textContent = 'If an email is saved for you, a 6-digit code is on its way (valid for 10 minutes). No email? Ask the sheet owner to add yours in Settings.';
+        $('otpMsg').textContent = t('otp.sent');
         startResend(); $('otpCode').focus();
-      } else { $('otpMsg').textContent = (r && r.error) || 'Could not send a code.'; }
+      } else { $('otpMsg').textContent = errText((r && r.error) || t('otp.fail')); }
     } catch (e) {
-      $('otpMsg').textContent = navigator.onLine ? 'Could not reach your Google script. Check the link and that access is set to Anyone.' : 'You are offline. Connect to the internet to get a code.';
+      $('otpMsg').textContent = navigator.onLine ? t('otp.unreach.long') : t('otp.offline.get');
     }
     $('otpSend').disabled = false;
   }
   async function verifyCode() {
     var code = $('otpCode').value.trim();
-    if (!/^\d{6}$/.test(code)) { $('otpMsg').textContent = 'Enter the 6-digit code from the email.'; return; }
+    if (!/^\d{6}$/.test(code)) { $('otpMsg').textContent = t('otp.enter'); return; }
     $('otpVerify').disabled = true;
     try {
       var r = await Core.api(conn, 'otp_verify', { person: conn.person, code: code, deviceId: conn.deviceId || deviceId, label: conn.device || 'Android' });
       if (r && r.ok) {
         conn.token = r.token; conn.person = r.person; await Core.kvSet('conn', conn);
-        if (forgot) { await Core.kvDel('pin'); pinRec = null; }
+        if (forgot) { await Core.kvDel('pin'); pinRec = null; await Core.kvDel('bio'); bioRec = null; }
         forgot = false; forceActivate = false; locked = false;
         $('otpCode').value = ''; $('otpBox').hidden = true; $('otpSend').hidden = false; $('otpMsg').textContent = '';
         route();
         if (screen === 'main') afterUnlock();
-      } else { $('otpMsg').textContent = (r && r.error) || 'That code did not work.'; }
+      } else { $('otpMsg').textContent = errText((r && r.error) || t('otp.bad')); }
     } catch (e) {
-      $('otpMsg').textContent = navigator.onLine ? 'Could not reach your Google script.' : 'You are offline. Connect to the internet and try again.';
+      $('otpMsg').textContent = navigator.onLine ? t('otp.unreach') : t('otp.offline.try');
     }
     $('otpVerify').disabled = false;
   }
@@ -414,41 +490,87 @@
     pinRec = { salt: salt, hash: await pinHash(pin, salt), len: pin.length, fails: 0, until: 0 };
     await Core.kvSet('pin', pinRec);
   }
+  function unlockNow() { locked = false; hiddenAt = 0; route(); afterUnlock(); }
   async function tryUnlock() {
     var pin = $('pinIn').value;
     if (!pin || !pinRec) return;
     var wait = Math.ceil((pinRec.until - Date.now()) / 1000);
-    if (wait > 0) { $('pinMsg').textContent = 'Too many tries. Wait ' + wait + ' seconds.'; $('pinIn').value = ''; return; }
+    if (wait > 0) { $('pinMsg').textContent = t('pin.wait', { n: wait }); $('pinIn').value = ''; return; }
     var h;
-    try { h = await pinHash(pin, pinRec.salt); } catch (e) { $('pinMsg').textContent = 'This browser cannot check a PIN here.'; return; }
+    try { h = await pinHash(pin, pinRec.salt); } catch (e) { $('pinMsg').textContent = t('pin.nocheck'); return; }
     if (h === pinRec.hash) {
       pinRec.fails = 0; pinRec.until = 0; await Core.kvSet('pin', pinRec);
-      locked = false; hiddenAt = 0; route(); afterUnlock(); return;
+      unlockNow(); return;
     }
     pinRec.fails++;
     $('pinIn').value = '';
-    if (pinRec.fails >= 10) {   // too many wrong PINs: forget the PIN and the sign-in, an email code is needed again
-      await Core.kvDel('pin'); pinRec = null; conn.token = ''; await Core.kvSet('conn', conn);
+    if (pinRec.fails >= 10) {   // too many wrong PINs: forget the PIN, the fingerprint and the sign-in, an email code is needed again
+      await Core.kvDel('pin'); pinRec = null; await Core.kvDel('bio'); bioRec = null;
+      conn.token = ''; await Core.kvSet('conn', conn);
       forgot = false; forceActivate = false;
-      $('otpMsg').textContent = 'Too many wrong PINs. Sign in again with a code.'; route(); return;
+      $('otpMsg').textContent = t('otp.pinwrong'); route(); return;
     }
     if (pinRec.fails % 5 === 0) pinRec.until = Date.now() + 30000;
     await Core.kvSet('pin', pinRec);
-    $('pinMsg').textContent = 'Wrong PIN. ' + (10 - pinRec.fails) + ' tries left before you must sign in again.';
+    $('pinMsg').textContent = t('pin.wrong', { n: 10 - pinRec.fails });
+  }
+
+  // ---------- fingerprint (the phone's own fingerprint or screen-lock check, through WebAuthn) ----------
+  // This is a local lock like the PIN: the browser asks the phone to verify you, and the app opens when it says yes.
+  async function detectBio() {
+    try { bioOk = !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); }
+    catch (e) { bioOk = false; }
+  }
+  function renderBioUi() {
+    $('bioBtn').hidden = !(bioOk && bioRec);
+    var tg = $('bioToggle');
+    tg.hidden = !(screen === 'main' && bioOk && pinRec);
+    tg.textContent = bioRec ? t('bio.off') : t('bio.on');
+  }
+  async function enableBio() {
+    try {
+      var cred = await navigator.credentials.create({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rp: { name: 'Expense Tracker', id: location.hostname },
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: (conn && conn.person) || 'user', displayName: (conn && conn.person) || 'user' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+        timeout: 60000, attestation: 'none' } });
+      if (!cred) throw new Error('cancelled');
+      bioRec = { id: b64(cred.rawId) };
+      await Core.kvSet('bio', bioRec);
+      renderBioUi(); msg(t('bio.enabled'), 'ok');
+    } catch (e) { msg(t('bio.cannot'), 'err'); }
+  }
+  async function disableBio() { await Core.kvDel('bio'); bioRec = null; renderBioUi(); msg(t('bio.disabled'), ''); }
+  async function bioUnlock() {
+    if (!bioRec || !bioOk || bioBusy || screen !== 'lock') return;
+    bioBusy = true; $('bioMsg').textContent = '';
+    try {
+      var r = await navigator.credentials.get({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rpId: location.hostname,
+        allowCredentials: [{ type: 'public-key', id: unb64(bioRec.id), transports: ['internal'] }],
+        userVerification: 'required', timeout: 60000 } });
+      bioBusy = false;
+      if (r) { unlockNow(); return; }
+    } catch (e) { /* cancelled or not recognised */ }
+    bioBusy = false;
+    $('bioMsg').textContent = t('bio.failed');
   }
 
   // ---------- edit and delete ----------
   function renderEdit() {
     $('editBar').hidden = !editing;
-    $('save').textContent = editing ? 'Save changes' : 'Save Record';
-    if (editing) $('editText').textContent = 'Editing an entry' + (editing.src === 'q' ? ' (not synced yet)' : '') + '.';
+    $('save').textContent = editing ? t('save.changes') : t('save.record');
+    if (editing) $('editText').textContent = editing.src === 'q' ? t('edit.text.q') : t('edit.text');
   }
   function startEdit(src, id) {
     var item = src === 'q' ? (queue.filter(function (e) { return e.id === id; })[0] || {}).payload
                            : recent.filter(function (e) { return e.id === id; })[0];
     if (!item) return;
     editing = { src: src, id: id };
-    ensureOption($('category'), item.category); ensureOption($('payment'), item.payment); ensureOption($('type'), item.type);
+    ensureOption($('category'), item.category); ensureOption($('payment'), item.payment); ensureOption($('type'), item.type, typeLabel);
     $('amount').value = item.amount; $('category').value = item.category; $('payment').value = item.payment;
     $('type').value = item.type || (cfg.types && cfg.types[item.category]) || 'Extra';
     $('date').value = item.date; $('time').value = item.time; $('remarks').value = item.remarks || '';
@@ -460,37 +582,37 @@
     if (editing.src === 'q') {   // not sent yet: change it on the phone
       var e = queue.filter(function (x) { return x.id === editing.id; })[0];
       if (e) { e.payload = Object.assign({}, e.payload, f); e.failed = false; e.error = ''; await Core.qPut(e); }
-      endEdit(); await refresh(); say('Changes saved on this phone \u2713', 'ok'); runSync(); return;
+      endEdit(); await refresh(); say(t('edit.savedLocal'), 'ok'); runSync(); return;
     }
-    say('Saving changes...', '');
+    say(t('edit.saving'), '');
     var r;
     try { r = await Core.api(conn, 'update', Object.assign({ id: editing.id }, f)); }
-    catch (err) { say('Connect to the internet to change saved entries.', 'err'); return; }
-    if (r && r.error === 'Not authorised') { needAuth('This phone needs to sign in again.'); return; }
-    if (!(r && r.ok)) { say((r && r.error) || 'Could not save the changes.', 'err'); return; }
+    catch (err) { say(t('edit.offline'), 'err'); return; }
+    if (r && r.error === 'Not authorised') { needAuth(t('auth.short')); return; }
+    if (!(r && r.ok)) { say(errText((r && r.error) || t('edit.fail')), 'err'); return; }
     var id = editing.id;
     recent = recent.map(function (x) { return x.id === id ? Object.assign({}, x, f) : x; });
     await Core.kvSet('recent', recent);
     if (r.budget && cfg) { cfg.budget = r.budget; await Core.kvSet('cfg', cfg); }
-    endEdit(); renderAll(); say('Changes saved \u2713', 'ok');
+    endEdit(); renderAll(); say(t('edit.saved'), 'ok');
   }
 
   async function deleteEntry(src, id) {
-    if (!confirm('Delete this entry? This cannot be undone.')) return;
+    if (!confirm(t('del.confirm'))) return;
     if (src === 'q') {
       await Core.qDel(id); if (editing && editing.id === id) endEdit();
-      await refresh(); msg('Entry deleted', 'ok'); return;
+      await refresh(); msg(t('del.done'), 'ok'); return;
     }
     var r;
     try { r = await Core.api(conn, 'delete', { id: id }); }
-    catch (err) { msg('Connect to the internet to delete saved entries.', 'err'); return; }
-    if (r && r.error === 'Not authorised') { needAuth('This phone needs to sign in again.'); return; }
-    if (!(r && r.ok)) { msg((r && r.error) || 'Could not delete the entry.', 'err'); return; }
+    catch (err) { msg(t('del.offline'), 'err'); return; }
+    if (r && r.error === 'Not authorised') { needAuth(t('auth.short')); return; }
+    if (!(r && r.ok)) { msg(errText((r && r.error) || t('del.fail')), 'err'); return; }
     recent = recent.filter(function (x) { return x.id !== id; });
     await Core.kvSet('recent', recent);
     if (r.budget && cfg) { cfg.budget = r.budget; await Core.kvSet('cfg', cfg); }
     if (editing && editing.id === id) endEdit();
-    renderAll(); msg('Entry deleted', 'ok');
+    renderAll(); msg(t('del.done'), 'ok');
   }
 
   // ---------- History ----------
@@ -499,72 +621,73 @@
     try {
       var r = await Core.api(conn, 'recent');
       if (r && r.ok) { recent = r.entries; await Core.kvSet('recent', recent); histNote = ''; }
-      else if (r && r.error === 'Not authorised') { needAuth('This phone needs to sign in again.'); return; }
-      else histNote = (r && r.error) || 'Could not load your history.';
-    } catch (e) { histNote = 'Offline: showing the last loaded list.'; }
+      else if (r && r.error === 'Not authorised') { needAuth(t('auth.short')); return; }
+      else histNote = errText((r && r.error) || t('hist.fail'));
+    } catch (e) { histNote = t('hist.offline'); }
     renderHistory();
   }
   function rowHtml(src, id, p, note) {
     return '<div class="qrow"><div><b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.category) + '</div>' +
       '<div class="meta">' + esc(p.date) + ' ' + esc(p.time) + (p.remarks ? ' &middot; ' + esc(p.remarks) : '') + '</div>' +
       (note ? '<div class="meta">' + esc(note) + '</div>' : '') +
-      '<button class="small" type="button" data-act="edit" data-src="' + src + '" data-id="' + esc(id) + '">Edit</button>' +
-      '<button class="small danger" type="button" data-act="del" data-src="' + src + '" data-id="' + esc(id) + '">Delete</button></div>';
+      '<button class="small" type="button" data-act="edit" data-src="' + src + '" data-id="' + esc(id) + '">' + esc(t('hist.edit')) + '</button>' +
+      '<button class="small danger" type="button" data-act="del" data-src="' + src + '" data-id="' + esc(id) + '">' + esc(t('hist.delete')) + '</button></div>';
   }
   function renderHistory() {
     if (histNote) paint($('histNote'), histNote, 'warn');
     else if ($('histNote').className === 'warn') paint($('histNote'), '', '');
     var pend = queue.filter(function (e) { return e.kind !== 'reflection'; }), seen = {};
     pend.forEach(function (e) { seen[e.id] = 1; });
-    var rows = pend.map(function (e) { return rowHtml('q', e.id, e.payload, e.failed ? 'Not saved: ' + e.error : 'Waiting to sync'); });
+    var rows = pend.map(function (e) { return rowHtml('q', e.id, e.payload, e.failed ? t('q.notSaved', { err: errText(e.error) }) : t('q.waitItem')); });
     rows = rows.concat(recent.filter(function (x) { return !seen[x.id]; }).map(function (x) { return rowHtml('s', x.id, x, ''); }));
-    $('histList').innerHTML = rows.length ? rows.join('') : '<p class="hint">No entries yet.</p>';
+    $('histList').innerHTML = rows.length ? rows.join('') : t('hist.none');
   }
 
   // ---------- Reflect ----------
-  function periodDate(sel) { var t = todayStr(); return sel === 'week1' ? shiftDate(t, -7) : sel === 'month1' ? shiftDate(t.slice(0, 7) + '-01', -1) : t; }
+  function periodDate(sel) { var d = todayStr(); return sel === 'week1' ? shiftDate(d, -7) : sel === 'month1' ? shiftDate(d.slice(0, 7) + '-01', -1) : d; }
   function periodKind(sel) { return sel.indexOf('week') === 0 ? 'Weekly' : 'Monthly'; }
   function renderReflectQs() {
-    var qs = REFLECT_Q[periodKind($('refPeriod').value)];
-    ['q1', 'q2', 'q3'].forEach(function (id, i) { $(id + 'l').textContent = qs[i]; });
+    var k = periodKind($('refPeriod').value) === 'Weekly' ? 'w' : 'm';
+    ['q1', 'q2', 'q3'].forEach(function (id, i) { $(id + 'l').textContent = t('ref.q.' + k + (i + 1)); });
+  }
+  function changeText(s, p) {
+    var diff = Math.round((s.spent - p.spent) / p.spent * 100);
+    return diff === 0 ? t('chg.same') : diff > 0 ? t('chg.up', { pct: Math.abs(diff) }) : t('chg.down', { pct: Math.abs(diff) });
   }
   function showStats(d, stale) {
     var s = d.stats, p = d.prev;
-    var h = '<b>' + esc(s.label) + '</b><br>';
+    var h = '<b>' + esc(I18N.label(s.label)) + '</b><br>';
     h += s.allowance !== null
-      ? 'Spent <b>' + money(s.spent) + '</b> of ' + money(s.allowance) + ' &middot; ' + (s.remaining < 0 ? '<b class="neg">over by ' + money(s.remaining) + '</b>' : '<b>' + money(s.remaining) + '</b> left')
-      : 'Spent <b>' + money(s.spent) + '</b>';
-    h += '<br>Needs ' + fmt(s.byType.Needs) + ' &middot; Wants ' + fmt(s.byType.Wants) + ' &middot; Culture ' + fmt(s.byType.Culture) + ' &middot; Extra ' + fmt(s.byType.Extra);
-    if (s.top && s.top.length) h += '<br>Top: ' + s.top.map(function (t) { return esc(t.category) + ' ' + fmt(t.amount); }).join(', ');
-    if (p && p.spent > 0) {
-      var diff = Math.round((s.spent - p.spent) / p.spent * 100);
-      h += '<br>' + esc(p.label) + ': ' + money(p.spent) + ' (' + (diff === 0 ? 'no change' : (diff > 0 ? 'up ' : 'down ') + Math.abs(diff) + '%') + ')';
-    }
-    if (s.period === 'month' && s.leftAfterSpending !== null) h += '<br>Left after spending: ' + (s.leftAfterSpending < 0 ? '-' : '') + money(s.leftAfterSpending) + ' (goal ' + money(s.goal) + ')';
-    if (stale) h += '<small>Last loaded numbers.</small>';
+      ? t('stats.spent.of', { amt: money(s.spent), allow: money(s.allowance), left: s.remaining < 0 ? t('over.by', { amt: money(s.remaining) }) : t('left.of', { amt: money(s.remaining) }) })
+      : t('stats.spent', { amt: money(s.spent) });
+    h += '<br>' + KAKEIBO.map(function (ty) { return typeLabel(ty) + ' ' + fmt(s.byType[ty]); }).join(' &middot; ');
+    if (s.top && s.top.length) h += t('stats.top', { list: s.top.map(function (x) { return esc(x.category) + ' ' + fmt(x.amount); }).join(', ') });
+    if (p && p.spent > 0) h += t('stats.prev', { label: esc(I18N.label(p.label)), amt: money(p.spent), change: changeText(s, p) });
+    if (s.period === 'month' && s.leftAfterSpending !== null) h += t('stats.leftafter', { amt: (s.leftAfterSpending < 0 ? '-' : '') + money(s.leftAfterSpending), goal: money(s.goal) });
+    if (stale) h += t('stats.last');
     $('refStats').innerHTML = h;
   }
   async function loadSummary() {
     var sel = $('refPeriod').value;
     renderReflectQs();
     var cached = await Core.kvGet('summary:' + sel);
-    if (cached) showStats(cached, true); else $('refStats').textContent = 'Loading your numbers...';
+    if (cached) showStats(cached, true); else $('refStats').textContent = t('sum.loading');
     if (!conn || !conn.token) return;
     try {
       var r = await Core.api(conn, 'summary', { period: periodKind(sel) === 'Weekly' ? 'week' : 'month', date: periodDate(sel) });
       if (sel !== $('refPeriod').value) return;
       if (r && r.ok) { var d = { stats: r.stats, prev: r.prev }; await Core.kvSet('summary:' + sel, d); showStats(d, false); }
-      else if (r && r.error === 'Not authorised') needAuth('This phone needs to sign in again.');
+      else if (r && r.error === 'Not authorised') needAuth(t('auth.short'));
     } catch (e) {
-      if (!cached) $('refStats').textContent = 'Connect to the internet to see your numbers. You can still write your reflection.';
+      if (!cached) $('refStats').textContent = t('sum.offline');
     }
   }
 
   // ---------- Month ----------
   var TYPE_COLORS = { Needs: '#2563eb', Wants: '#f59e0b', Culture: '#10b981', Extra: '#ef4444' };
   function monthDate(n) {
-    var t = todayStr(), d = new Date(Date.UTC(+t.slice(0, 4), +t.slice(5, 7) - 1 - n, 1));
-    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + (n === 0 ? t.slice(8, 10) : '01');
+    var d0 = todayStr(), d = new Date(Date.UTC(+d0.slice(0, 4), +d0.slice(5, 7) - 1 - n, 1));
+    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + (n === 0 ? d0.slice(8, 10) : '01');
   }
   function short(n) { return n >= 1000 ? (Math.round(n / 100) / 10) + 'k' : String(Math.round(n)); }
   function barRow(label, value, pct, color) {
@@ -574,7 +697,7 @@
   function weeksSvg(weeks) {
     var n = weeks.length, bw = 300 / n, base = 92, top = 14, max = 1;
     weeks.forEach(function (w) { max = Math.max(max, w.spent, w.allowance || 0); });
-    var out = '<svg class="chart" viewBox="0 0 300 110" role="img" aria-label="Spending against allowance, by week">';
+    var out = '<svg class="chart" viewBox="0 0 300 110" role="img" aria-label="' + esc(t('chart.weeks')) + '">';
     weeks.forEach(function (w, i) {
       var x = i * bw + bw * 0.2, wd = bw * 0.6, hs = w.spent / max * (base - top), ha = w.allowance ? w.allowance / max * (base - top) : 0;
       var over = w.allowance && w.spent > w.allowance;
@@ -588,7 +711,7 @@
   function daysSvg(days, today) {
     var n = days.length, bw = 300 / n, base = 56, max = 1;
     days.forEach(function (d) { max = Math.max(max, d.spent); });
-    var out = '<svg class="chart" viewBox="0 0 300 70" role="img" aria-label="Spending by day">';
+    var out = '<svg class="chart" viewBox="0 0 300 70" role="img" aria-label="' + esc(t('chart.days')) + '">';
     days.forEach(function (d, i) {
       var h = d.spent / max * (base - 6);
       out += '<rect x="' + (i * bw + bw * 0.12).toFixed(1) + '" y="' + (base - h).toFixed(1) + '" width="' + (bw * 0.76).toFixed(1) + '" height="' + Math.max(h, d.spent ? 1 : 0).toFixed(1) +
@@ -600,74 +723,84 @@
     });
     return out + '<line x1="0" y1="' + base + '" x2="300" y2="' + base + '" style="stroke:var(--line)"/></svg>';
   }
-  function targetRow(t) {
-    var days = daysBetween(todayStr(), t.targetDate);
-    var color = t.status === 'reached' ? 'var(--ok)' : (t.status === 'behind' || t.status === 'overdue' || t.status === 'past') ? 'var(--warn)' : '';
-    var msg = t.status === 'reached' ? 'target reached'
-      : (t.status === 'overdue' || t.status === 'past') ? 'the target date has passed'
-      : days + ' day' + (days === 1 ? '' : 's') + ' to go';
-    if (t.status === 'behind') msg += ' &middot; set aside ' + money(t.needed) + ' a month (plan ' + money(t.planned) + ')';
-    else if (t.status === 'on-track') msg += ' &middot; on track';
-    return barRow(t.name, t.progress + '%', t.progress, color) +
-      '<p class="meta" style="margin:0 0 6px">' + money(t.balance) + ' of ' + money(t.target) + ' by ' + esc(t.targetDate) + ' &middot; ' + msg + '</p>';
+  function targetRow(f) {
+    var days = daysBetween(todayStr(), f.targetDate);
+    var color = f.status === 'reached' ? 'var(--ok)' : (f.status === 'behind' || f.status === 'overdue' || f.status === 'past') ? 'var(--warn)' : '';
+    var m = f.status === 'reached' ? t('t.reached') : (f.status === 'overdue' || f.status === 'past') ? t('t.passed') : tn('t.days', days, { days: days });
+    if (f.status === 'behind') m += t('t.behind', { needed: money(f.needed), planned: money(f.planned) });
+    else if (f.status === 'on-track') m += t('t.ontrack');
+    return barRow(f.name, f.progress + '%', f.progress, color) +
+      '<p class="meta" style="margin:0 0 6px">' + t('t.line', { bal: money(f.balance), target: money(f.target), date: esc(f.targetDate), msg: m }) + '</p>';
   }
   function showMonth(d, stale, n) {
-    var s = d.stats, p = d.prev, h = '<b>' + esc(s.label) + '</b>';
+    var s = d.stats, p = d.prev, h = '<b>' + esc(I18N.label(s.label)) + '</b>';
     var left = s.remaining, isOver = left !== null && left < 0;
-    h += '<div class="kpis"><div><small>Spent</small><b>' + money(s.spent) + '</b></div>' +
-         '<div><small>Allowance</small><b>' + (s.allowance === null ? '-' : money(s.allowance)) + '</b></div>' +
-         '<div><small>' + (isOver ? 'Over by' : 'Left') + '</small><b class="' + (isOver ? 'neg' : '') + '">' + (left === null ? '-' : money(left)) + '</b></div></div>';
+    h += '<div class="kpis"><div><small>' + esc(t('k.spent')) + '</small><b>' + money(s.spent) + '</b></div>' +
+         '<div><small>' + esc(t('k.allow')) + '</small><b>' + (s.allowance === null ? '-' : money(s.allowance)) + '</b></div>' +
+         '<div><small>' + esc(isOver ? t('k.over') : t('k.left')) + '</small><b class="' + (isOver ? 'neg' : '') + '">' + (left === null ? '-' : money(left)) + '</b></div></div>';
     if (s.allowance) {
       var lv = level(s.allowance, left), color = lv.lev === 2 ? 'var(--err)' : lv.lev === 1 ? 'var(--warn)' : '';
-      h += barRow('Allowance used', lv.pct + '%', lv.pct, color);
+      h += barRow(t('m.used'), lv.pct + '%', lv.pct, color);
     }
     var days = n === 0 ? +todayStr().slice(8, 10) : (s.daily ? s.daily.length : 1);
     var note = [];
-    if (s.count) note.push(money(s.spent / days) + ' a day');
-    if (s.fixedPaid) note.push('fixed costs paid ' + money(s.fixedPaid));
-    if (s.savingsPaid) note.push('savings and funds paid ' + money(s.savingsPaid));
-    if (p && p.spent > 0) { var diff = Math.round((s.spent - p.spent) / p.spent * 100); note.push((diff === 0 ? 'same as ' : (diff > 0 ? 'up ' : 'down ') + Math.abs(diff) + '% on ') + esc(p.label)); }
+    if (s.count) note.push(t('m.perday', { amt: money(s.spent / days) }));
+    if (s.fixedPaid) note.push(t('m.fixed', { amt: money(s.fixedPaid) }));
+    if (s.savingsPaid) note.push(t('m.savings', { amt: money(s.savingsPaid) }));
+    if (p && p.spent > 0) {
+      var diff = Math.round((s.spent - p.spent) / p.spent * 100), lab = esc(I18N.label(p.label));
+      note.push(diff === 0 ? t('m.same', { label: lab }) : diff > 0 ? t('m.up', { pct: Math.abs(diff), label: lab }) : t('m.down', { pct: Math.abs(diff), label: lab }));
+    }
     if (note.length) h += '<p class="hint" style="margin:6px 0 0">' + note.join(' &middot; ') + '</p>';
 
-    var total = 0; ['Needs', 'Wants', 'Culture', 'Extra'].forEach(function (t) { total += s.byType[t]; });
-    h += '<h3 class="sec">Kakeibo split</h3>';
-    if (!total) h += '<p class="hint">No spending recorded yet.</p>';
+    var total = 0; KAKEIBO.forEach(function (ty) { total += s.byType[ty]; });
+    h += '<h3 class="sec">' + t('m.split') + '</h3>';
+    if (!total) h += '<p class="hint">' + esc(t('m.nospend')) + '</p>';
     else {
-      h += '<div class="stack">' + ['Needs', 'Wants', 'Culture', 'Extra'].map(function (t) {
-        return s.byType[t] ? '<div style="width:' + (s.byType[t] / total * 100).toFixed(1) + '%;background:' + TYPE_COLORS[t] + '"></div>' : '';
-      }).join('') + '</div><div class="legend">' + ['Needs', 'Wants', 'Culture', 'Extra'].map(function (t) {
-        return '<span><span class="dot" style="background:' + TYPE_COLORS[t] + '"></span>' + t + ' ' + fmt(s.byType[t]) + ' (' + Math.round(s.byType[t] / total * 100) + '%)</span>';
+      h += '<div class="stack">' + KAKEIBO.map(function (ty) {
+        return s.byType[ty] ? '<div style="width:' + (s.byType[ty] / total * 100).toFixed(1) + '%;background:' + TYPE_COLORS[ty] + '"></div>' : '';
+      }).join('') + '</div><div class="legend">' + KAKEIBO.map(function (ty) {
+        return '<span><span class="dot" style="background:' + TYPE_COLORS[ty] + '"></span>' + esc(typeLabel(ty)) + ' ' + fmt(s.byType[ty]) + ' (' + Math.round(s.byType[ty] / total * 100) + '%)</span>';
       }).join('') + '</div>';
     }
     var cats = (s.byCategory || []).slice(0, 8);
     if (cats.length) {
-      h += '<h3 class="sec">By category</h3>';
+      h += '<h3 class="sec">' + t('m.bycat') + '</h3>';
       cats.forEach(function (c) { h += barRow(c.category, fmt(c.amount), c.amount / cats[0].amount * 100); });
     }
-    if (s.weeks && s.weeks.length) h += '<h3 class="sec">By week <span class="meta">(dashed = allowance)</span></h3>' + weeksSvg(s.weeks);
-    if (s.daily && s.daily.length) h += '<h3 class="sec">By day</h3>' + daysSvg(s.daily, n === 0 ? +todayStr().slice(8, 10) : 0);
+    var lims = d.limits || [];
+    if (lims.length) {
+      h += '<h3 class="sec">' + t('m.limits') + '</h3>';
+      lims.forEach(function (l) {
+        var pct = Math.round(l.spent / l.limit * 100);
+        h += barRow(l.category, fmt(l.spent) + ' / ' + fmt(l.limit), pct, l.spent > l.limit ? 'var(--err)' : pct >= ((cfg && cfg.warnAt) || 80) ? 'var(--warn)' : '');
+      });
+    }
+    if (s.weeks && s.weeks.length) h += '<h3 class="sec">' + t('m.byweek') + '</h3>' + weeksSvg(s.weeks);
+    if (s.daily && s.daily.length) h += '<h3 class="sec">' + t('m.byday') + '</h3>' + daysSvg(s.daily, n === 0 ? +todayStr().slice(8, 10) : 0);
     if (d.funds && d.funds.length) {
-      h += '<h3 class="sec">Funds</h3>' + d.funds.map(function (f) {
-        return '<div class="bar"><span class="lab">' + esc(f.name) + '</span><span class="val" style="flex:1;text-align:left;color:var(--text)">' + (f.balance < 0 ? '<b class="neg">overdrawn by ' + money(f.balance) + '</b>' : '<b>' + money(f.balance) + '</b> set aside') + '</span></div>';
+      h += '<h3 class="sec">' + t('m.funds') + '</h3>' + d.funds.map(function (f) {
+        return '<div class="bar"><span class="lab">' + esc(f.name) + '</span><span class="val" style="flex:1;text-align:start;color:var(--text)">' +
+          (f.balance < 0 ? t('m.fund.over', { amt: money(f.balance) }) : t('m.fund.ok', { amt: money(f.balance) })) + '</span></div>';
       }).join('');
     }
-    var targets = n === 0 ? (d.targets || []).filter(function (t) { return t.target > 0 && t.targetDate; }) : [];
-    if (targets.length) h += '<h3 class="sec">Fund targets</h3>' + targets.map(targetRow).join('');
-    if (stale) h += '<p class="meta">Last loaded numbers.</p>';
+    var targets = n === 0 ? (d.targets || []).filter(function (f) { return f.target > 0 && f.targetDate; }) : [];
+    if (targets.length) h += '<h3 class="sec">' + t('m.targets') + '</h3>' + targets.map(targetRow).join('');
+    if (stale) h += t('m.last');
     $('monBody').innerHTML = h;
   }
   async function loadMonth() {
     var n = +$('monPeriod').value, date = monthDate(n), key = 'month:' + date.slice(0, 7);
     var cached = await Core.kvGet(key);
-    if (cached) showMonth(cached, true, n); else $('monBody').innerHTML = '<p class="hint">Loading your numbers...</p>';
+    if (cached) showMonth(cached, true, n); else $('monBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>';
     if (!conn || !conn.token) return;
     try {
       var r = await Core.api(conn, 'summary', { period: 'month', date: date, detail: true });
       if (n !== +$('monPeriod').value) return;
-      if (r && r.ok) { var d = { stats: r.stats, prev: r.prev, funds: r.funds || [], targets: r.targets || [] }; await Core.kvSet(key, d); showMonth(d, false, n); }
-      else if (r && r.error === 'Not authorised') needAuth('This phone needs to sign in again.');
+      if (r && r.ok) { var d = { stats: r.stats, prev: r.prev, funds: r.funds || [], targets: r.targets || [], limits: r.limits || [] }; await Core.kvSet(key, d); showMonth(d, false, n); }
+      else if (r && r.error === 'Not authorised') needAuth(t('auth.short'));
     } catch (e) {
-      if (!cached) $('monBody').innerHTML = '<p class="hint">Connect to the internet to see your month. After that it is kept on your phone.</p>';
+      if (!cached) $('monBody').innerHTML = t('m.offline');
     }
   }
 
@@ -688,10 +821,14 @@
   $('refPeriod').addEventListener('change', loadSummary);
   $('histRefresh').addEventListener('click', function () { loadHistory(); });
 
+  $('langBtn').addEventListener('click', async function () { lang = lang === 'ur' ? 'en' : 'ur'; await Core.kvSet('lang', lang); applyLang(); });
+  $('bioToggle').addEventListener('click', function () { if (bioRec) disableBio(); else enableBio(); });
+  $('bioBtn').addEventListener('click', bioUnlock);
+
   $('save').addEventListener('click', async function () {
     var amount = parseFloat(($('amount').value || '').replace(/,/g, ''));
-    if (!isFinite(amount) || amount <= 0) { say('Enter a valid amount', 'err'); $('amount').focus(); return; }
-    if (!cfg) { say('Connect to the internet once to load your categories', 'err'); return; }
+    if (!isFinite(amount) || amount <= 0) { say(t('f.invalid'), 'err'); $('amount').focus(); return; }
+    if (!cfg) { say(t('f.nocfg'), 'err'); return; }
     var f = collect(amount);
     if (editing) { await saveEdit(f); return; }
     var id = newId();
@@ -700,7 +837,7 @@
     await Core.qPut(entry); queue.push(entry);
     prefs = { category: f.category, payment: f.payment }; Core.kvSet('prefs', prefs);   // remembered for next time
     $('amount').value = ''; $('remarks').value = ''; setNow(); $('after').innerHTML = '';
-    say('Saved on this phone \u2713', 'ok');
+    say(t('saved.local'), 'ok');
     renderAll(); registerBackgroundSync(); runSync();
   });
 
@@ -720,12 +857,12 @@
   $('favSave').addEventListener('click', async function () {
     var cat = $('category').value;
     if (!cat) return;
-    var label = window.prompt('Name this favourite', ($('remarks').value || cat).trim().slice(0, 20));
+    var label = window.prompt(t('fav.prompt'), ($('remarks').value || cat).trim().slice(0, 20));
     label = label ? label.trim().slice(0, 24) : '';
     if (!label) return;
     var amount = parseFloat(($('amount').value || '').replace(/,/g, '')) || 0;
     favs.push({ id: newId(), label: label, amount: amount, category: cat, payment: $('payment').value, remarks: $('remarks').value });
-    await Core.kvSet('favs', favs); renderFavs(); say('Favourite saved \u2605', 'ok');
+    await Core.kvSet('favs', favs); renderFavs(); say(t('fav.saved'), 'ok');
   });
 
   $('histList').addEventListener('click', function (ev) {
@@ -737,18 +874,18 @@
 
   $('refSave').addEventListener('click', async function () {
     var sel = $('refPeriod').value, q1 = $('q1').value.trim(), q2 = $('q2').value.trim(), q3 = $('q3').value.trim();
-    if (!q1 && !q2 && !q3) { paint($('refStatus'), 'Write at least one answer.', 'err'); return; }
+    if (!q1 && !q2 && !q3) { paint($('refStatus'), t('ref.empty'), 'err'); return; }
     var id = newId();
     var entry = { id: id, savedAt: Date.now(), kind: 'reflection',
                   payload: { action: 'reflect', id: id, kind: periodKind(sel), date: periodDate(sel), q1: q1, q2: q2, q3: q3 } };
     await Core.qPut(entry); queue.push(entry);
     $('q1').value = ''; $('q2').value = ''; $('q3').value = '';
-    paint($('refStatus'), 'Reflection saved \u2713', 'ok');
+    paint($('refStatus'), t('ref.saved'), 'ok');
     renderAll(); registerBackgroundSync(); runSync();
   });
 
-  $('syncBtn').addEventListener('click', async function () { say('Syncing...', ''); await runSync(); loadConfig(); });
-  $('retryCfg').addEventListener('click', function () { say('Trying...', ''); loadConfig(); });
+  $('syncBtn').addEventListener('click', async function () { say(t('sync.syncing'), ''); await runSync(); loadConfig(); });
+  $('retryCfg').addEventListener('click', function () { say(t('cfg.trying'), ''); loadConfig(); });
   $('qlist').addEventListener('click', async function (ev) {
     var b = ev.target.closest('button'); if (!b) return;
     var id = b.getAttribute('data-id'), act = b.getAttribute('data-act');
@@ -762,7 +899,7 @@
   // setup, sign-in and PIN screens
   $('sSave').addEventListener('click', async function () {
     var api = $('sApi').value.trim(), person = $('sPerson').value.trim();
-    if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(api) || !person) { $('sMsg').textContent = 'Enter the full /exec URL and your name.'; return; }
+    if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(api) || !person) { $('sMsg').textContent = t('setup.invalid'); return; }
     conn = { api: api, person: person, token: '', deviceId: deviceId, device: 'Android' };
     await Core.kvSet('conn', conn); route();
   });
@@ -772,30 +909,30 @@
   $('otpCode').addEventListener('input', function () { if (this.value.length === 6) verifyCode(); });
   $('actCancel').addEventListener('click', function () { forceActivate = false; forgot = false; route(); });
   $('actChange').addEventListener('click', async function () {
-    if (queue.length && !confirm(queue.length + ' unsent entries will be sent under the new name. Continue?')) return;
-    await Core.kvDel('conn'); await Core.kvDel('cfg'); await Core.kvDel('pin');
-    conn = null; cfg = null; pinRec = null; forceActivate = false; forgot = false; route();
+    if (queue.length && !confirm(t('change.confirm', { n: queue.length }))) return;
+    await Core.kvDel('conn'); await Core.kvDel('cfg'); await Core.kvDel('pin'); await Core.kvDel('bio');
+    conn = null; cfg = null; pinRec = null; bioRec = null; forceActivate = false; forgot = false; route();
   });
   $('pinSave').addEventListener('click', async function () {
     var a = $('pin1').value, b = $('pin2').value, m = $('pinSetMsg');
-    if (!/^\d{4,6}$/.test(a)) { m.textContent = 'Use 4 to 6 digits.'; return; }
-    if (a !== b) { m.textContent = 'The two PINs do not match.'; return; }
-    try { await savePin(a); } catch (e) { m.textContent = 'This browser cannot protect a PIN here (it needs a secure https page).'; return; }
+    if (!/^\d{4,6}$/.test(a)) { m.textContent = t('pin.digits'); return; }
+    if (a !== b) { m.textContent = t('pin.match'); return; }
+    try { await savePin(a); } catch (e) { m.textContent = t('pin.nosave'); return; }
     $('pin1').value = ''; $('pin2').value = ''; m.textContent = '';
-    locked = false; hiddenAt = 0; route(); afterUnlock();
+    unlockNow();
   });
   $('pinGo').addEventListener('click', tryUnlock);
   $('pinIn').addEventListener('input', function () { if (pinRec && this.value.length === pinRec.len) tryUnlock(); });
-  $('forgotPin').addEventListener('click', function () { forceActivate = true; forgot = true; $('otpMsg').textContent = 'We will email you a code to reset your PIN.'; $('otpBox').hidden = true; $('otpSend').hidden = false; route(); });
+  $('forgotPin').addEventListener('click', function () { forceActivate = true; forgot = true; $('otpMsg').textContent = t('otp.forgot'); $('otpBox').hidden = true; $('otpSend').hidden = false; route(); });
   $('lockNow').addEventListener('click', function () { locked = true; route(); });
 
   $('resetLink').addEventListener('click', async function () {
     var n = queue.length;
-    if (!confirm(n ? n + ' entries have not reached your sheet yet and will be lost. Reset anyway?' : 'Reset this app on this phone?')) return;
-    ['conn', 'cfg', 'pin', 'prefs', 'favs', 'recent', 'fundNoteDay'].forEach(function (k) { Core.kvDel(k); });
+    if (!confirm(n ? t('reset.confirm.n', { n: n }) : t('reset.confirm'))) return;
+    ['conn', 'cfg', 'pin', 'bio', 'prefs', 'favs', 'recent', 'fundNoteDay'].forEach(function (k) { Core.kvDel(k); });
     (await Core.kvKeys()).forEach(function (k) { if (/^(summary|month):/.test(String(k))) Core.kvDel(k); });
     await Core.qClear();
-    conn = null; cfg = null; pinRec = null; queue = []; favs = []; prefs = {}; recent = []; fundNoteDay = ''; forceActivate = false; forgot = false; formReady = false;
+    conn = null; cfg = null; pinRec = null; bioRec = null; queue = []; favs = []; prefs = {}; recent = []; fundNoteDay = ''; forceActivate = false; forgot = false; formReady = false;
     say('', ''); route();
   });
 
@@ -817,11 +954,16 @@
   async function boot() {
     conn = (await Core.kvGet('conn')) || null;
     pinRec = (await Core.kvGet('pin')) || null;
+    bioRec = (await Core.kvGet('bio')) || null;
     prefs = (await Core.kvGet('prefs')) || {};
     favs = (await Core.kvGet('favs')) || [];
     fundNoteDay = (await Core.kvGet('fundNoteDay')) || '';
     deviceId = (await Core.kvGet('deviceId')) || '';
     if (!deviceId) { deviceId = newId(); await Core.kvSet('deviceId', deviceId); }
+    lang = (await Core.kvGet('lang')) || (/^ur/i.test(navigator.language || '') ? 'ur' : 'en');
+    I18N.setLang(lang);
+    await detectBio();
+    if (!bioOk) bioRec = null;
 
     // A personal link carries the web app address and the person's name (never a secret).
     var p = new URLSearchParams(location.search);
@@ -829,14 +971,14 @@
       var api = p.get('api'), person = p.get('person');
       if (!conn || conn.api !== api || norm(conn.person) !== norm(person)) {
         conn = { api: api, person: person, token: '', deviceId: deviceId, device: 'Android' };
-        await Core.kvSet('conn', conn); await Core.kvDel('pin'); await Core.kvDel('cfg'); pinRec = null;
+        await Core.kvSet('conn', conn); await Core.kvDel('pin'); await Core.kvDel('bio'); await Core.kvDel('cfg'); pinRec = null; bioRec = null;
       }
       try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
     }
     applyHash();
 
     await refresh();
-    locked = !!pinRec;               // the PIN is asked for every time the app starts
+    locked = !!pinRec;               // the PIN (or fingerprint) is asked for every time the app starts
     route();
     if (screen === 'main') onTab(tab);
     if (conn && conn.token) { await loadConfig(); await runSync(); }   // sending entries does not need the PIN

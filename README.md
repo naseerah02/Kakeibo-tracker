@@ -1,4 +1,4 @@
-# Kakeibo Family Expense Tracker (Android, v2.3)
+# Kakeibo Family Expense Tracker (Android, v2.4)
 
 A private family expense tracker built on a Google Sheet and an installable Android app. Log an expense in a few taps, even with no internet. Each phone signs in with an emailed code and a PIN, and everything lands in one shared sheet with a dashboard based on the Japanese **Kakeibo** budgeting method.
 
@@ -24,13 +24,14 @@ A private family expense tracker built on a Google Sheet and an installable Andr
 11. [Funds: Zakat, Qurbani and your own](#funds-zakat-qurbani-and-your-own)
 12. [Recurring expenses](#recurring-expenses)
 13. [Reflection and the summary emails](#reflection-and-the-summary-emails)
-14. [Offline behaviour](#offline-behaviour)
-15. [Customising](#customising)
-16. [Updating](#updating)
-17. [Troubleshooting](#troubleshooting)
-18. [Limits and known limitations](#limits-and-known-limitations)
-19. [API reference](#api-reference)
-20. [Testing checklist](#testing-checklist)
+14. [Urdu language](#urdu-language)
+15. [Offline behaviour](#offline-behaviour)
+16. [Customising](#customising)
+17. [Updating](#updating)
+18. [Troubleshooting](#troubleshooting)
+19. [Limits and known limitations](#limits-and-known-limitations)
+20. [API reference](#api-reference)
+21. [Testing checklist](#testing-checklist)
 
 ---
 
@@ -41,10 +42,12 @@ A private family expense tracker built on a Google Sheet and an installable Andr
 | **Entry** | Amount, category, Kakeibo type, payment mode, date, time, remarks. The app remembers your last category and payment mode, and you can save **favourites** (for example "Tea, 50") as one-tap chips. |
 | **History** | See your latest entries and **edit or delete** them from the app. |
 | **Budget warnings** | The budget banner turns amber when you have used 80% of the week's or month's allowance (you choose the level) and red when you are over. Under the amount, a preview shows what the purchase would do before you save it. |
+| **Category limits** | An optional monthly limit for any category (for example Food & Dining). You get a note when one is nearly used up, a preview before you save, and the Month tab, the Dashboard and the emails show it. |
+| **Urdu** | The whole app can be switched to Urdu (اردو), right to left, with one tap. |
 | **Month** | A month summary inside the app: key figures, Kakeibo split, categories, weeks, days and fund balances. |
 | **Shortcuts** | Long-press the app icon for Add expense, Pay Zakat, History and Month summary. |
 | **Offline** | Entries are queued on the phone and sent later, also in the background when Android allows. |
-| **Sign-in** | Email code (OTP) once per phone, then a PIN each time the app opens. Phones can be revoked. |
+| **Sign-in and lock** | Email code (OTP) once per phone, then a **PIN or your fingerprint** each time the app opens. Phones can be revoked. |
 | **Kakeibo** | Needs, Wants, Culture, Extra and Savings. A monthly household **Plan** gives a weekly allowance and a budget banner. |
 | **Funds** | Earmarked funds with a running balance: Zakat and Qurbani to start with, and **up to 8** of your own (Hajj, Emergency, Wedding...). Each can have a **target amount and date**, with reminders in the app and by email when it is behind. A "Pay from a fund" button for each fund sits on the Add tab. |
 | **Recurring** | Rent, subscriptions and instalments are added automatically each month. |
@@ -89,7 +92,8 @@ A private family expense tracker built on a Google Sheet and an installable Andr
 Code.gs                    Google Apps Script backend (paste into your Sheet)
 offline-app/
   index.html               The Android app page
-  app.js                   App logic: sign-in, PIN, Add / History / Reflect
+  app.js                   App logic: sign-in, PIN and fingerprint, Add / History / Month / Reflect
+  i18n.js                  All the app's text in English and Urdu, and the language switch
   core.js                  Phone storage and syncing, shared with the service worker
   sw.js                    Service worker: offline support + background sync
   manifest.webmanifest     Makes the app installable (with home-screen shortcuts)
@@ -97,14 +101,14 @@ offline-app/
 README.md                  This file
 ```
 
-`offline-app.zip` contains the seven files inside `offline-app/`.
+`offline-app.zip` contains the eight files inside `offline-app/`.
 
 ### What the sheet contains
 
 | Tab | Purpose |
 |---|---|
 | `Expenses` | One row per expense: Date, Month, Time, Category, Amount, Payment Mode, Remarks, Device Name, Person, ID, Kakeibo Type |
-| `Settings` | Summary email (B2), currency (B3), budget warning level (B4), categories with Kakeibo type and fixed flag, people with emails, payment modes, fund links and fund targets |
+| `Settings` | Summary email (B2), currency (B3), budget warning level (B4), categories with Kakeibo type, fixed flag and monthly limit (D to G), people with emails, payment modes, fund links and fund targets |
 | `Plan` | One row per month: income, planned fixed costs, savings goal, and a monthly set-aside column for each fund (H to O) |
 | `Funds` | Monthly ledger with a set-aside, paid and balance column for each fund (rebuilt automatically from the funds listed in Settings) |
 | `Recurring` | Expenses added automatically every month |
@@ -137,7 +141,8 @@ Allow about 40 minutes the first time.
    - Column **I**: enter each person's **email address**. A person without an email cannot sign in.
    - **B2**: the email address(es) that receive the weekly and monthly summaries (several can be separated by commas).
    - **B3**: the currency label (default `PKR`).
-   - **B4**: the budget warning level, as a percentage of the allowance used (default `80`, allowed 50 to 99).
+   - **B4**: the budget warning level, as a percentage of the allowance used (default `80`, allowed 50 to 99). It also decides when a category limit starts to warn.
+   - **G** (column next to the categories): an optional **monthly limit** for a category. Leave it empty for no limit. See [Category limits](#category-limits).
    - **L to P** (rows 2 to 9): the list of funds, with an optional **target amount** (N) and **target date** (O) for each. Zakat and Qurbani are there to start with. To add more, use the **Expense Tracker** menu. See [Adding your own funds](#adding-your-own-funds) and [Fund targets and reminders](#fund-targets-and-reminders).
    - Columns D to F: review the categories, their Kakeibo type and the fixed-cost flag.
 2. **Plan tab** (yellow cells): this month's **Income**, **Fixed costs (planned)**, **Savings goal**, and the **Zakat** and **Qurbani** set-asides. Plain numbers only.
@@ -157,7 +162,7 @@ Allow about 40 minutes the first time.
 ### Part 4. Host the app on GitHub Pages
 
 1. On **github.com** click **+ > New repository**. Name it (for example `kakeibo-tracker`), choose **Public**, and create it.
-2. Unzip `offline-app.zip`. In the empty repository click **uploading an existing file** and drag in the **seven files** themselves (not the zip and not a folder): `index.html`, `app.js`, `core.js`, `sw.js`, `manifest.webmanifest`, `icon-192.png`, `icon-512.png`. Click **Commit changes**. `index.html` must be at the top level.
+2. Unzip `offline-app.zip`. In the empty repository click **uploading an existing file** and drag in the **eight files** themselves (not the zip and not a folder): `index.html`, `app.js`, `i18n.js`, `core.js`, `sw.js`, `manifest.webmanifest`, `icon-192.png`, `icon-512.png`. Click **Commit changes**. `index.html` must be at the top level.
 3. Open **Settings > Pages**. Under "Build and deployment" choose **Deploy from a branch**, branch **main**, folder **/(root)**, and click **Save**.
 4. After a minute or two the page shows your address, such as `https://yourname.github.io/kakeibo-tracker/`. Open it: you should see the "First-time setup" screen.
 
@@ -193,7 +198,7 @@ The repository holds only code. It has no keys and no data.
 1. Paste the new `Code.gs`, save, and run **setup** (it is safe to re-run). It adds the new tabs and an Email column for people, and replaces the old secret key row with the summary-email row.
 2. Enter each person's email in `Settings` column I, and the summary email in B2.
 3. **Deploy > Manage deployments > pencil > New version > Deploy**, then run **installTriggers**.
-4. Upload the seven new app files to GitHub, replacing the old ones.
+4. Upload the eight new app files to GitHub, replacing the old ones.
 5. On each phone open the app: it asks for an email code and a PIN. Entries that were waiting are kept and sent after signing in.
 6. The old secret key no longer exists, so old links with `key=...` are harmless: the app ignores it.
 
@@ -221,6 +226,13 @@ The repository holds only code. It has no keys and no data.
 3. Reload the sheet. The **Expense Tracker** menu appears.
 4. Upload `index.html`, `app.js` and `sw.js` to GitHub, replacing the old ones.
 5. Open the app online on each phone.
+
+### From version 2.3 to 2.4
+
+1. Paste the new `Code.gs`, save, and run **setup** (safe to re-run). It adds the **Monthly limit** column (`Settings` column G) and the Limit column on the Dashboard.
+2. **Deploy > Manage deployments > pencil > New version > Deploy.**
+3. Upload all eight app files to GitHub, replacing the old ones. There is a **new file, `i18n.js`**: the app will not start without it.
+4. Open the app online on each phone. To use the fingerprint, unlock the app and tap **Turn on fingerprint** at the bottom. For Urdu, tap **اردو** at the bottom.
 
 ---
 
@@ -265,6 +277,24 @@ The week and the month are checked separately, so you may see a warning for one 
 - **Offline:** the figures are estimates built from the last known budget minus entries not yet synced, and the banner says so.
 - The preview is a nudge, not a block: you can still save.
 
+### Category limits
+
+A **limit** caps what you want to spend in one category in a month, for example PKR 10,000 for Food & Dining. It is separate from the weekly allowance: you can use limits with or without a Plan.
+
+**Setting one.** In `Settings`, type the amount in column **G** on the category's row (the column is headed *Monthly limit*). Clear the cell to remove it. Limits count the category's entries for the calendar month. Entries of type Savings never count, because they are not spending.
+
+**What you see in the app.**
+
+- **A note on the Add tab** when a category has used up your warning level of its limit (80% unless you changed `Settings!B4`), for example "Food & Dining 🍔: 92% of its PKR 10,000 monthly limit used". It turns red when the limit is passed ("over its PKR 10,000 monthly limit by PKR 500"). At most the three worst categories are shown.
+- **A line under the amount** when you choose a category that has a limit: "Food & Dining 🍔: PKR 7,000 left of its PKR 10,000 limit", in amber or red if saving would reach or pass it. It sits next to the week and month preview.
+- **After you save**, the warning for that category is repeated under the button.
+- **Entries still waiting to sync** are counted too, so the figures are right offline.
+- **Month tab:** a *Category limits* section with a bar for each limit and the figures as spent / limit.
+
+**Elsewhere.** The Dashboard's category table has a **Limit** column, and the spent figure turns red when it is over. The weekly and monthly emails list any category at or over the warning level.
+
+A limit does not stop you saving. It is a nudge, like the budget warnings.
+
 ### Month
 
 The **Month** tab is a summary of the whole month without opening the sheet. Choose **This month**, **Last month** or **2 months ago**:
@@ -272,6 +302,7 @@ The **Month** tab is a summary of the whole month without opening the sheet. Cho
 - **Key figures:** spent, allowance and what is left (or by how much you are over), a meter showing the percentage of the allowance used, the average per day, and how this month compares with the one before.
 - **Kakeibo split:** Needs, Wants, Culture and Extra as a bar, with amounts and percentages.
 - **By category:** your biggest categories.
+- **Category limits:** each limit as a bar, amber when close and red when over (shown when you have set limits).
 - **By week:** spending for each week block against its allowance (the dashed outline). A bar turns red when the week went over.
 - **By day:** a small chart of daily spending, with today highlighted.
 - **Funds:** the balance of every fund (red if overdrawn). In the **This month** view, funds that have a target also show a progress bar, the days to go, and how much to set aside each month.
@@ -322,6 +353,17 @@ Limits: a code is valid for 10 minutes, five wrong tries cancel it, and a person
 - Five wrong tries make you wait 30 seconds. Ten wrong tries sign the phone out, so a new email code is needed. Unsent entries are kept.
 - **Forgot PIN?** sends an email code and lets you set a new PIN.
 - The PIN is stored only as a salted hash on the phone.
+
+### Fingerprint
+
+You can open the app with your fingerprint instead of typing the PIN. The PIN stays as the fallback, so you can always use it.
+
+- **Turn it on:** unlock the app, then tap **Turn on fingerprint** at the bottom. Android asks you to confirm with your fingerprint (or the screen lock it is set up with). The option only appears on phones and browsers that support it.
+- **Using it:** when the lock screen appears, Android asks for your fingerprint straight away. If you cancel or it is not recognised, type the PIN, or tap **Use fingerprint** to try again. A failed fingerprint does **not** count as a wrong PIN.
+- **Turn it off:** **Turn off fingerprint** at the bottom of the app. Resetting a forgotten PIN, ten wrong PINs, using a different name, or **Reset this app** also switch it off.
+- **How it works:** the app uses your phone's own fingerprint check (the standard web feature called WebAuthn, with a credential that must be verified on the device). Your fingerprint never leaves the phone and the app never sees it.
+
+> Like the PIN, this is a convenience lock that keeps casual snooping out. The check is done by the phone for the app on the same device, so it is not protection against someone with full control of the phone. Keep Android's own screen lock on.
 
 > The PIN is a convenience lock on top of your phone's screen lock. It stops someone casually opening the app on an unlocked phone. It is not protection against a determined attacker who has full control of the device, so keep Android's own screen lock on.
 
@@ -526,6 +568,20 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 
 ---
 
+## Urdu language
+
+The app can be shown in **Urdu (اردو)**, laid out right to left, or in English.
+
+- **Switching:** tap **اردو** (or **English**) at the bottom of any screen, including the sign-in and lock screens. The choice is remembered on that phone.
+- **First start:** a phone whose language is set to Urdu starts in Urdu. Otherwise the app starts in English.
+- **What is translated:** every screen, button, label, message and warning in the app, the Kakeibo type names (Needs, Wants, Culture, Extra, Savings), the Reflect questions, the chart titles, and the month names that Google sends.
+- **What is not translated:** the **content of your sheet**. Category names, payment modes, fund names, people and remarks appear exactly as you typed them, in whatever language and with whatever emoji you used. You can type them in Urdu in the sheet if you like. Also in English: the summary emails, the Dashboard, and the sheet itself.
+- **Numbers and money** keep the usual digits (0 to 9). The amount field is always left to right so figures are easy to type.
+- **Fonts:** the app uses a Nastaliq font such as Noto Nastaliq Urdu when the phone has one, and otherwise a Naskh font. Most Android phones set to Urdu have one of them. If the text looks cramped on your phone, that is the phone's font.
+- **Behind the scenes:** all text lives in one file, `i18n.js`, in English and Urdu side by side. To change a word, edit it there and re-upload the file (and raise the cache version in `sw.js`). The same file is where a third language would be added.
+
+---
+
 ## Offline behaviour
 
 - The app opens with no internet from a saved copy, using the lists from the last time it was online. After the first sign-in it needs internet only to sync, to load History and Reflect numbers, and to change entries already in the sheet.
@@ -547,7 +603,9 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 | Summary email | `Settings!B2` |
 | Payment modes | `Settings` column J (the dashboard shows the first 8) |
 | Currency label | `Settings!B3`, then run `buildDashboard()` |
-| Budget warning level | `Settings!B4` (percentage of the allowance used, 50 to 99, default 80) |
+| Budget warning level | `Settings!B4` (percentage of the allowance used, 50 to 99, default 80). It is also the level at which a category limit starts to warn |
+| Category limits | `Settings` column G, on the category's row. Leave empty for no limit |
+| Language | The **اردو / English** link at the bottom of the app. Wording: `i18n.js` |
 | Home-screen shortcuts | `shortcuts` in `manifest.webmanifest` (Android shows at most four) |
 | Funds | **Expense Tracker > Add a fund...**, or `Settings` columns L:M (name and category), up to 8 |
 | Fund targets | `Settings` columns N (amount) and O (date), next to each fund. The reminder days (90, 30, 7 and 0) are `FUND_MILESTONES` in `Code.gs` |
@@ -561,7 +619,7 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 
 **Backend (`Code.gs`):** paste the new code, save, then **Deploy > Manage deployments > pencil > New version > Deploy**. If the dashboard changed, run `buildDashboard()`. If new tabs or columns were added, run `setup()` again (safe to re-run).
 
-**App files (GitHub):** upload the changed files to your repository (**Add file > Upload files**), replacing the old ones. If you changed any app file, also raise the version in `sw.js` (`expense-app-v7` becomes `v8`) so phones fetch the new copy. Each phone updates the next time you open the app with internet. Close and reopen the app once more if the old version still shows.
+**App files (GitHub):** upload the changed files to your repository (**Add file > Upload files**), replacing the old ones. If you changed any app file, also raise the version in `sw.js` (`expense-app-v8` becomes `v9`) so phones fetch the new copy. Each phone updates the next time you open the app with internet. Close and reopen the app once more if the old version still shows.
 
 ---
 
@@ -592,6 +650,12 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 | A new fund shows in the sheet but not in the app | Open the app while online so it can fetch the list, or tap **Sync now**. |
 | A fund's payments do not change its balance | The payment was logged under a different category. The ledger only counts the fund's own category (Settings column M). |
 | "Set-asides are more than the savings goal" in the Plan | The fund columns add up to more than the Savings goal for that month. Raise the goal or lower a set-aside. |
+| No **Turn on fingerprint** option | The phone or browser does not support it, or no fingerprint (or screen lock) is set up in Android. Use Chrome on a phone with a fingerprint sensor, and add a fingerprint in Android's settings. |
+| Fingerprint stopped working after a PIN reset | Resetting the PIN switches the fingerprint off. Unlock and turn it on again. |
+| A category limit shows nothing | The limit goes in `Settings` column G on that category's row, as a number above 0. The app picks it up the next time it is online. |
+| A limit looks too low | Only the calendar month counts, and entries of type Savings do not. Entries still waiting to sync are included in the app. |
+| The app shows English words in Urdu mode | Those words come from your sheet (category names and so on) or from the emails. The app's own text is all in `i18n.js`. If a word is missing there, the app shows the English for it. |
+| The app will not start after updating | The new file `i18n.js` was not uploaded to GitHub. Upload all eight files. |
 | An entry is missing from History | Only your own entries with an ID appear, and only the latest 40. |
 | No budget banner | The `Plan` tab has no income for the current month. |
 | Recurring expense was not added | `Active` must be `Yes`, the start month must have begun, and `installTriggers` must have been run. Check the day of month. |
@@ -617,12 +681,15 @@ They go to the address in `Settings!B2`. Run `installTriggers` once to schedule 
 | History | Your latest 40 entries that have an ID |
 | Recurring rows | up to 199 |
 | Emails | About 100 per day on a personal Google account |
+| Category limits | One monthly limit per category, on the 39 category rows. The Dashboard table shows the first 20 |
+| Languages | English and Urdu |
 
 Other things to know:
 
 - **One-way sync.** Phones send entries to the sheet. The app does not show other people's expenses, only the household budget figures.
 - **Background sync** depends on Android and Chrome. Battery savers can delay it. Opening the app always syncs.
-- **The PIN is a convenience lock**, not a defence against someone with full control of the phone (see [Sign-in, PIN and privacy](#sign-in-pin-and-privacy)).
+- **The PIN and the fingerprint are convenience locks**, not a defence against someone with full control of the phone (see [Sign-in, PIN and privacy](#sign-in-pin-and-privacy)). The fingerprint check is done by the phone for the app and is not verified on a server.
+- **Urdu covers the app only.** The emails, the Dashboard and your sheet's own wording stay as they are.
 - **Editing the sheet by hand is fine** (change or delete rows), and the Plan, Funds and dashboard update automatically. Rows typed by hand have no ID, so they cannot be edited from the app.
 - The app depends on Google allowing a web page to read your script's reply. If a browser change ever blocks it, the app shows "Could not reach your Google script".
 - Deleting or renaming the tabs breaks the script. Run `setup()` to recreate missing ones.
@@ -639,15 +706,16 @@ For developers. Everything except the health check is a `POST` to the `/exec` ad
 |---|---|---|---|
 | `otp_request` | no | `person` | `{"ok":true}` (the same reply whether or not the person exists) |
 | `otp_verify` | no | `person`, `code`, `deviceId`, `label` | `{"ok":true,"token":"...","person":"Ali"}` |
-| `config` | yes | none | currency, categories, types, fixed list, payments, `funds`, `fundTargets`, `warnAt`, `lockSeconds`, `budget` (including `weekAllowance`) |
+| `config` | yes | none | currency, categories, types, fixed list, payments, `funds`, `fundTargets`, `warnAt`, `lockSeconds`, `budget` (including `weekAllowance` and `limits`) |
 | `save` (default) | yes | `amount`, `category`, `type`, `payment`, `remarks`, `device`, `date`, `time`, `id` | `{"ok":true,"type":...,"fixed":...,"saving":...,"fund":...,"budget":{...}}` |
 | `recent` | yes | none | `{"ok":true,"entries":[...]}` (own entries) |
 | `update` | yes | `id` plus the `save` fields | `{"ok":true,"budget":{...}}` |
 | `delete` | yes | `id` | `{"ok":true,"budget":{...}}` |
-| `summary` | yes | `period` (`week` or `month`), `date`, optional `detail: true` | `{"ok":true,"stats":{...},"prev":{...}}`. With `detail`, `stats` also has `byCategory`, `daily` and (for months) `weeks`, and the reply includes fund balances in `funds` and the fund targets in `targets`. |
+| `summary` | yes | `period` (`week` or `month`), `date`, optional `detail: true` | `{"ok":true,"stats":{...},"prev":{...}}`. With `detail`, `stats` also has `byCategory`, `daily` and (for months) `weeks`, and the reply includes fund balances in `funds` the fund targets in `targets`, and the category limits in `limits`. |
 | `reflect` | yes | `kind` (`Weekly`/`Monthly`), `date`, `q1`, `q2`, `q3`, `id` | `{"ok":true}` |
 
 - `date` accepts `YYYY-MM-DD` or `DD/MM/YYYY`; `time` is `HH:mm`. Both default to now.
+- `budget.limits` is a list of `{category, limit, spent}` for the month, one for each category that has a limit. It is present even when no Plan covers the month.
 - The person on an entry always comes from the token, never from the request.
 - Category and payment names match ignoring case, emoji and punctuation. Unknown values become "Other".
 - An `id` already saved returns `{"ok":true,"duplicate":true}` without a new row.
@@ -671,6 +739,9 @@ After installing, check each of these once:
 - [ ] Budget warnings: with the week close to its allowance the banner turns amber, and a large amount shows an amber or red line under the amount field
 - [ ] The Month tab shows figures, the Kakeibo split and charts, and still shows a month you opened before when you go offline
 - [ ] Touch and hold the app icon: the Pay Zakat shortcut opens the form with the Zakat category chosen
+- [ ] Set a limit on Food & Dining in `Settings` column G. Typing an amount over it in that category shows a red line under the amount, and a note appears on the Add tab once the limit is nearly used
+- [ ] Unlock the app, tap **Turn on fingerprint**, close the app and reopen it: Android asks for your fingerprint and the app opens. Cancel it once: the PIN still works
+- [ ] Tap **اردو**: every screen turns right to left in Urdu. Tap **English** and it returns. Close and reopen: the choice is kept
 - [ ] Set a Qurbani target and date in `Settings`: the Month tab shows its progress and the monthly amount needed
 - [ ] Set the target date about 20 days away with a low balance: the Add tab shows a red fund banner, and running `checkFundReminders` sends an email once (and not a second time)
 - [ ] A Zakat or Qurbani payment shows the fund balance and does not change the weekly figure
