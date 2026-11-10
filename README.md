@@ -1,4 +1,4 @@
-# Kakeibo Family Expense Tracker (Android, v2.4)
+# Kakeibo Family Expense Tracker (Android, v2.5)
 
 A private family expense tracker built on a Google Sheet and an installable Android app. Log an expense in a few taps, even with no internet. Each phone signs in with an emailed code and a PIN, and everything lands in one shared sheet with a dashboard based on the Japanese **Kakeibo** budgeting method.
 
@@ -44,6 +44,7 @@ A private family expense tracker built on a Google Sheet and an installable Andr
 | **Budget warnings** | The budget banner turns amber when you have used 80% of the week's or month's allowance (you choose the level) and red when you are over. Under the amount, a preview shows what the purchase would do before you save it. |
 | **Category limits** | An optional monthly limit for any category (for example Food & Dining). You get a note when one is nearly used up, a preview before you save, and the Month tab, the Dashboard and the emails show it. |
 | **Urdu** | The whole app can be switched to Urdu (اردو), right to left, with one tap. |
+| **Fund statement** | A **Funds** tab with a statement for each fund: balance, set aside so far, paid out, progress to the target, a month-by-month table, and every payment made from it. |
 | **Month** | A month summary inside the app: key figures, Kakeibo split, categories, weeks, days and fund balances. |
 | **Shortcuts** | Long-press the app icon for Add expense, Pay Zakat, History and Month summary. |
 | **Offline** | Entries are queued on the phone and sent later, also in the background when Android allows. |
@@ -234,11 +235,17 @@ The repository holds only code. It has no keys and no data.
 3. Upload all eight app files to GitHub, replacing the old ones. There is a **new file, `i18n.js`**: the app will not start without it.
 4. Open the app online on each phone. To use the fingerprint, unlock the app and tap **Turn on fingerprint** at the bottom. For Urdu, tap **اردو** at the bottom.
 
+### From version 2.4 to 2.5
+
+1. Paste the new `Code.gs`, save, and **deploy a new version** (Deploy > Manage deployments > pencil > New version > Deploy). No `setup()` is needed: there are no sheet changes.
+2. Upload the changed app files to GitHub, replacing the old ones: `index.html`, `app.js`, `i18n.js` and `sw.js`.
+3. Open the app online on each phone. The Funds tab appears.
+
 ---
 
 ## Daily use
 
-The app has four tabs: **Add**, **History**, **Month** and **Reflect**.
+The app has five tabs: **Add**, **History**, **Month**, **Funds** and **Reflect**.
 
 ### Add
 
@@ -310,6 +317,24 @@ The **Month** tab is a summary of the whole month without opening the sheet. Cho
 
 The numbers are kept on the phone, so a month you have already opened still shows offline, marked "Last loaded numbers".
 
+### Funds: a statement for each fund
+
+The **Funds** tab shows one fund at a time. Choose the fund at the top (Zakat, Qurbani, or any you added). You can also tap a fund's name in the Funds section of the Month tab.
+
+| What you see | Meaning |
+|---|---|
+| **Balance** | What the fund holds now: opening balance + set aside so far - paid out. Red with a minus sign if you paid more than you had set aside. |
+| **Set aside so far** | The opening balance plus every monthly set-aside from your Plan, up to this month. |
+| **Paid out** | Everything paid from the fund under its category, since the Plan began. |
+| **Target** and **Still to reach** | The target amount from `Settings`, and how much more the balance needs to reach it. |
+| **Progress bar** | The balance as a percentage of the target, with the days to go and what to set aside each month (against what your Plan sets aside today). |
+| **Month by month** | A table with the set-aside, the payments and the balance for each month, newest first. Months still to come are not shown. |
+| **Payments** | Every payment from the fund, newest first: amount, who paid, date and time, payment mode and remarks. This includes payments by other people in the family, not only yours. At most the latest 100 are listed. |
+
+The **Pay from this fund** button at the bottom opens the form with that fund's category already chosen.
+
+If a fund has no target, the screen says how to add one. A fund you have opened once is kept on the phone, so it still shows offline, marked "Last loaded numbers".
+
 ### Home-screen shortcuts
 
 After installing, touch and hold the app icon on the home screen to see up to four shortcuts:
@@ -321,7 +346,7 @@ After installing, touch and hold the app icon on the home screen to see up to fo
 | **History** | Your latest entries |
 | **Month summary** | The Month tab |
 
-The app still asks for the PIN first, then goes straight to the screen you picked. Android shows at most four shortcuts. The Reflect tab opens from the link in the weekly summary email, and a link ending in `#fund-` and a fund's name (for example `#fund-hajj` or `#fund-emergency-fund`) opens the form with that fund chosen, so you can add your own link or home-screen bookmark for any fund. `#qurbani` works the same way. A shortcut can take up to a day to appear after an update, because Android refreshes an installed app's shortcuts on its own schedule. Reinstalling the app makes it immediate.
+The app still asks for the PIN first, then goes straight to the screen you picked. Android shows at most four shortcuts. The Reflect tab opens from the link in the weekly summary email, and a link ending in `#fund-` and a fund's name (for example `#fund-hajj` or `#fund-emergency-fund`) opens the form with that fund chosen, so you can add your own link or home-screen bookmark for any fund. A link ending in `#funds` opens the Funds tab. `#qurbani` works the same way. A shortcut can take up to a day to appear after an update, because Android refreshes an installed app's shortcuts on its own schedule. Reinstalling the app makes it immediate.
 
 ### Status messages
 
@@ -494,6 +519,27 @@ The sheet and the app hold **up to 8 funds**. Every fund works like Zakat and Qu
 - Payments must be logged under the fund's own category, because the category is how the ledger finds them.
 - The Plan's **Check** column (P) turns red if the set-asides add up to more than the savings goal.
 
+### How a payment from a fund is recorded and tracked
+
+1. **Recording it.** Tap the fund's button under **Pay from a fund** on the Add tab (or choose its category, such as Zakat 🤲), enter the amount and save. The entry has type **Savings**, so it counts as money paid out of savings and not as spending. The app confirms with the fund's new balance.
+2. **What it changes.** It lowers the **balance** of that fund. It does **not** change total spent, the weekly or monthly allowance, free to spend, category limits or the "Invested / saved" figure. It does appear in the Savings part of the Kakeibo split.
+3. **Where each number is.**
+
+| Number | Where |
+|---|---|
+| **Target** (amount, date) | You set it in `Settings` columns N and O. Shown on the Funds tab, the Month tab, the Dashboard and in the reminder emails. |
+| **Collected** (set aside so far) | The Funds tab in the app. In the sheet: the `Funds` tab (per month) and the Dashboard ("Set aside to date"). |
+| **Spent** (paid out) | The Funds tab in the app. In the sheet: the `Funds` tab ("paid") and the Dashboard ("Paid out to date", "Paid this month"). |
+| **Remaining** (balance) | The Funds tab, the Month tab, the note after each payment, the `Funds` tab and the Dashboard. |
+| **Remaining to target** | The Funds tab ("Still to reach" and the progress bar), the Dashboard ("Needed / month") and the emails. |
+| **Each payment** | The Funds tab lists them. In the sheet: the `Expenses` tab, filtered by the fund's category. |
+
+**Worked example.** A Zakat fund with an opening balance of 6,000, a plan of 4,000 a month from October, and a target of 30,000. By the end of December 18,000 has been set aside and the balance is 18,000 (60% of the target). In January you pay 10,000. Set aside so far is now 22,000, paid out 10,000 and the **balance 12,000**.
+
+Because the target is compared with the **balance**, the progress now reads 40% and the fund shows as behind, even though the payment was part of what you owed. Lower the target by the amount you paid (to 20,000) and it reads 60% again. Do this each time you pay part of a fund that has a target.
+
+The monthly set-aside is a plan, not a bank transfer: it is counted whether or not you actually moved the money. A payment larger than the balance shows the balance as overdrawn, in red.
+
 ### Fund targets and reminders
 
 A target turns a fund from "money I have set aside" into "money I need by a date". Both are optional.
@@ -619,7 +665,7 @@ The app can be shown in **Urdu (اردو)**, laid out right to left, or in Engli
 
 **Backend (`Code.gs`):** paste the new code, save, then **Deploy > Manage deployments > pencil > New version > Deploy**. If the dashboard changed, run `buildDashboard()`. If new tabs or columns were added, run `setup()` again (safe to re-run).
 
-**App files (GitHub):** upload the changed files to your repository (**Add file > Upload files**), replacing the old ones. If you changed any app file, also raise the version in `sw.js` (`expense-app-v8` becomes `v9`) so phones fetch the new copy. Each phone updates the next time you open the app with internet. Close and reopen the app once more if the old version still shows.
+**App files (GitHub):** upload the changed files to your repository (**Add file > Upload files**), replacing the old ones. If you changed any app file, also raise the version in `sw.js` (`expense-app-v9` becomes `v10`) so phones fetch the new copy. Each phone updates the next time you open the app with internet. Close and reopen the app once more if the old version still shows.
 
 ---
 
@@ -656,6 +702,9 @@ The app can be shown in **Urdu (اردو)**, laid out right to left, or in Engli
 | A limit looks too low | Only the calendar month counts, and entries of type Savings do not. Entries still waiting to sync are included in the app. |
 | The app shows English words in Urdu mode | Those words come from your sheet (category names and so on) or from the emails. The app's own text is all in `i18n.js`. If a word is missing there, the app shows the English for it. |
 | The app will not start after updating | The new file `i18n.js` was not uploaded to GitHub. Upload all eight files. |
+| The Funds tab says "Fund not found" | The fund was renamed or removed in `Settings` columns L to P. Open the app online so it fetches the current list. |
+| The Funds tab shows "Connect to the internet" | You have not opened that fund online yet. Open it once with internet and it is kept. |
+| "Paid out" is smaller than the payments list | The ledger starts at the first month on the Plan tab. Payments from before that month appear in the list but not in the totals. |
 | An entry is missing from History | Only your own entries with an ID appear, and only the latest 40. |
 | No budget banner | The `Plan` tab has no income for the current month. |
 | Recurring expense was not added | `Active` must be `Yes`, the start month must have begun, and `installTriggers` must have been run. Check the day of month. |
@@ -711,6 +760,7 @@ For developers. Everything except the health check is a `POST` to the `/exec` ad
 | `recent` | yes | none | `{"ok":true,"entries":[...]}` (own entries) |
 | `update` | yes | `id` plus the `save` fields | `{"ok":true,"budget":{...}}` |
 | `delete` | yes | `id` | `{"ok":true,"budget":{...}}` |
+| `fund_statement` | yes | `fund` (the fund's name) | `{"ok":true,"fund":{...},"months":[...],"payments":[...],"paymentCount":n,"paymentTotal":n}`. `fund` has the opening balance, set aside, paid, balance and the target details. `months` lists the ledger months up to today. `payments` holds up to 100 payments from any person, newest first |
 | `summary` | yes | `period` (`week` or `month`), `date`, optional `detail: true` | `{"ok":true,"stats":{...},"prev":{...}}`. With `detail`, `stats` also has `byCategory`, `daily` and (for months) `weeks`, and the reply includes fund balances in `funds` the fund targets in `targets`, and the category limits in `limits`. |
 | `reflect` | yes | `kind` (`Weekly`/`Monthly`), `date`, `q1`, `q2`, `q3`, `id` | `{"ok":true}` |
 
@@ -743,6 +793,7 @@ After installing, check each of these once:
 - [ ] Unlock the app, tap **Turn on fingerprint**, close the app and reopen it: Android asks for your fingerprint and the app opens. Cancel it once: the PIN still works
 - [ ] Tap **اردو**: every screen turns right to left in Urdu. Tap **English** and it returns. Close and reopen: the choice is kept
 - [ ] Set a Qurbani target and date in `Settings`: the Month tab shows its progress and the monthly amount needed
+- [ ] Open the **Funds** tab: the balance, set aside and paid out match the `Funds` tab in the sheet. Log a payment from a fund, then open the tab again: the payment is at the top of the list and the balance has dropped by that amount
 - [ ] Set the target date about 20 days away with a low balance: the Add tab shows a red fund banner, and running `checkFundReminders` sends an email once (and not a second time)
 - [ ] A Zakat or Qurbani payment shows the fund balance and does not change the weekly figure
 - [ ] **Expense Tracker > Add a fund...** adds a fund; its set-aside column appears on the Plan, and after the app syncs it appears as a button under "Pay from a fund"
