@@ -100,6 +100,12 @@
   [dir=rtl] .bar .val { text-align: left; }
   [dir=rtl] .alertline { text-align: start; }
   .banner.over { }
+  .tab { font-size: 14px; padding: 9px 2px; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th, .tbl td { padding: 5px 3px; border-bottom: 1px solid var(--line); text-align: end; }
+  .tbl th:first-child, .tbl td:first-child { text-align: start; }
+  .tbl th { color: var(--muted); font-weight: 600; }
+  .bar .lab a.link { margin: 0; color: var(--accent); }
 </style>
 </head>
 <body>
@@ -160,6 +166,7 @@
       <button class="tab on" type="button" data-tab="add" data-i18n="tab.add">Add</button>
       <button class="tab" type="button" data-tab="history" data-i18n="tab.history">History</button>
       <button class="tab" type="button" data-tab="month" data-i18n="tab.month">Month</button>
+      <button class="tab" type="button" data-tab="funds" data-i18n="tab.funds">Funds</button>
       <button class="tab" type="button" data-tab="reflect" data-i18n="tab.reflect">Reflect</button>
     </nav>
 
@@ -216,6 +223,12 @@
       <label for="monPeriod" data-i18n="mon.label">Month</label>
       <select id="monPeriod"><option value="0" data-i18n="mon.0">This month</option><option value="1" data-i18n="mon.1">Last month</option><option value="2" data-i18n="mon.2">2 months ago</option></select>
       <div id="monBody" style="margin-top:12px"><p class="hint">Loading your numbers...</p></div>
+    </div>
+
+    <div id="tabFunds" hidden>
+      <label for="fsPick" data-i18n="fs.pick">Fund</label>
+      <select id="fsPick"></select>
+      <div id="fsBody" style="margin-top:12px"></div>
     </div>
 
     <div id="tabReflect" hidden>

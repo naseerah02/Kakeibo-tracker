@@ -378,6 +378,7 @@ function route_(p) {
     case 'update': return updateEntry_(p, auth);
     case 'delete': return deleteEntry_(p, auth);
     case 'summary': return summaryFor_(p);
+    case 'fund_statement': return fundStatement_(p);
     case 'reflect': return saveReflection_(p, auth);
     default: return { ok: false, error: 'Unknown action' };
   }
@@ -750,6 +751,57 @@ function fundBalances_(dateStr) {
     const hit = fundRow_(dateStr);
     return cfg.funds.map(function (f) { return { name: f.name, balance: hit ? Math.round(Number(hit[17 + f.slot]) || 0) : 0 }; });
   } catch (err) { return []; }
+}
+
+// ======================================================================
+// Fund statement (the app's Funds tab)
+// ======================================================================
+
+/**
+ * Everything about one fund up to today: the totals, the month-by-month ledger from the Funds tab, progress towards the
+ * target, and every payment made from it (any person) with the newest first. p.fund is the fund's name.
+ */
+function fundStatement_(p) {
+  const cfg = getConfig_(), want = norm_(p.fund);
+  const f = cfg.funds.filter(function (x) { return norm_(x.name) === want; })[0];
+  const ss = SpreadsheetApp.getActiveSpreadsheet(), fu = ss.getSheetByName(FUNDS);
+  if (!f || !fu) return { ok: false, error: 'Fund not found' };
+  const today = today_();
+
+  const opening = Math.round(Number(fu.getRange(2, 2 + f.slot).getValue()) || 0);
+  const months = [];
+  fu.getRange('A4:Y39').getValues().forEach(function (r) {
+    if (!(r[0] instanceof Date)) return;
+    const d = dayStr_(r[0]);
+    if (d > today) return;                                   // months still to come are not part of the statement
+    months.push({ month: d.slice(0, 7), setAside: Math.round(Number(r[1 + f.slot]) || 0),
+                  paid: Math.round(Number(r[9 + f.slot]) || 0), balance: Math.round(Number(r[17 + f.slot]) || 0) });
+  });
+  let setAside = opening, paid = 0;
+  months.forEach(function (m) { setAside += m.setAside; paid += m.paid; });
+  const balance = months.length ? months[months.length - 1].balance : opening;
+
+  const t = fundTargets_(today).filter(function (x) { return x.category === f.category; })[0] || {};
+
+  const ex = ss.getSheetByName(EXPENSES), last = ex.getLastRow(), pay = [];
+  if (last > 1) {
+    ex.getRange(2, 1, last - 1, 11).getValues().forEach(function (r) {
+      if (!(r[0] instanceof Date) || String(r[3]) !== f.category) return;
+      pay.push({ date: dayStr_(r[0]), time: timeStr_(r[2]), amount: Number(r[4]) || 0, person: String(r[8] || ''),
+                 payment: String(r[5] || ''), remarks: String(r[6] || '') });
+    });
+  }
+  pay.sort(function (a, b) { return (b.date + b.time).localeCompare(a.date + a.time); });
+  const total = pay.reduce(function (sum, x) { return sum + x.amount; }, 0);
+
+  return {
+    ok: true,
+    fund: { name: f.name, category: f.category, opening: opening, setAsideToDate: setAside, paidToDate: paid, balance: balance,
+            target: t.target || 0, targetDate: t.targetDate || '', status: t.status || 'none', progress: t.progress || 0,
+            remaining: t.remaining || 0, needed: t.needed || 0, planned: t.planned || 0,
+            daysLeft: t.daysLeft, projected: t.projected, shortfall: t.shortfall },
+    months: months, payments: pay.slice(0, 100), paymentCount: pay.length, paymentTotal: Math.round(total)
+  };
 }
 
 // ======================================================================

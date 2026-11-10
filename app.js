@@ -18,7 +18,7 @@
   var favs = [], prefs = {}, lang = 'en';
   var locked = true, hiddenAt = 0, forceActivate = false, forgot = false;
   var screen = '', lastScreen = '', tab = 'add', editing = null, formReady = false;
-  var syncing = false, cfgMsg = '', histNote = '', installPrompt = null, resendTimer = null, fundNoteDay = '';
+  var syncing = false, cfgMsg = '', histNote = '', installPrompt = null, resendTimer = null, fundNoteDay = '', fsFund = '';
 
   // ---------- small helpers ----------
   function newId() {
@@ -75,7 +75,7 @@
     n.className = 'chip' + (navigator.onLine ? '' : ' off');
   }
   function renderTabs() {
-    ['add', 'history', 'month', 'reflect'].forEach(function (x) {
+    ['add', 'history', 'month', 'funds', 'reflect'].forEach(function (x) {
       $('tab' + x.charAt(0).toUpperCase() + x.slice(1)).hidden = x !== tab;
     });
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) { b.className = 'tab' + (b.getAttribute('data-tab') === tab ? ' on' : ''); });
@@ -83,6 +83,7 @@
   function onTab(x) {
     if (x === 'history') { renderHistory(); loadHistory(); }
     if (x === 'month') loadMonth();
+    if (x === 'funds') loadFunds();
     if (x === 'reflect') loadSummary();
   }
   function switchTab(x) { tab = x; renderTabs(); onTab(x); }
@@ -286,7 +287,7 @@
     var h = location.hash.replace('#', '');
     if (h === 'zakat' || h === 'qurbani') { tab = 'add'; pendingFund = h; }
     else if (/^fund-./.test(h)) { tab = 'add'; pendingFund = norm(h.slice(5)); }          // #fund-hajj for any fund you add
-    else if (['add', 'history', 'month', 'reflect'].indexOf(h) >= 0) { tab = h; pendingFund = ''; }
+    else if (['add', 'history', 'month', 'funds', 'reflect'].indexOf(h) >= 0) { tab = h; pendingFund = ''; }
     else return;
     if (screen === 'main') { renderTabs(); onTab(tab); tryFund(); }
   }
@@ -780,7 +781,7 @@
     if (s.daily && s.daily.length) h += '<h3 class="sec">' + t('m.byday') + '</h3>' + daysSvg(s.daily, n === 0 ? +todayStr().slice(8, 10) : 0);
     if (d.funds && d.funds.length) {
       h += '<h3 class="sec">' + t('m.funds') + '</h3>' + d.funds.map(function (f) {
-        return '<div class="bar"><span class="lab">' + esc(f.name) + '</span><span class="val" style="flex:1;text-align:start;color:var(--text)">' +
+        return '<div class="bar"><span class="lab"><a class="link" data-fs="' + esc(f.name) + '">' + esc(f.name) + '</a></span><span class="val" style="flex:1;text-align:start;color:var(--text)">' +
           (f.balance < 0 ? t('m.fund.over', { amt: money(f.balance) }) : t('m.fund.ok', { amt: money(f.balance) })) + '</span></div>';
       }).join('');
     }
@@ -804,6 +805,69 @@
     }
   }
 
+  // ---------- Funds: the statement for one fund ----------
+  var MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function monthText(ym) { return I18N.label(MON3[+ym.slice(5, 7) - 1] + ' ' + ym.slice(0, 4)); }
+  function signed(n) { return (n < 0 ? '-' : '') + money(n); }
+
+  function showFund(d, stale) {
+    var f = d.fund, h = '';
+    h += '<div class="kpis"><div><small>' + esc(t('fs.balance')) + '</small><b class="' + (f.balance < 0 ? 'neg' : '') + '">' + signed(f.balance) + '</b></div>' +
+         '<div><small>' + esc(t('fs.collected')) + '</small><b>' + money(f.setAsideToDate) + '</b></div>' +
+         '<div><small>' + esc(t('fs.paid')) + '</small><b>' + money(f.paidToDate) + '</b></div></div>';
+    if (f.opening) h += '<p class="meta" style="margin:0 0 6px">' + esc(t('fs.opening', { amt: money(f.opening) })) + '</p>';
+    if (f.target > 0 && f.targetDate) {
+      h += '<div class="kpis"><div><small>' + esc(t('fs.target')) + '</small><b>' + money(f.target) + '</b></div>' +
+           '<div><small>' + esc(t('fs.togo')) + '</small><b>' + money(f.remaining) + '</b></div></div>' + targetRow(f);
+    } else {
+      h += '<p class="hint">' + esc(t('fs.notarget')) + '</p>';
+    }
+    var ms = d.months || [];
+    if (ms.length) {
+      h += '<h3 class="sec">' + esc(t('fs.months')) + '</h3><table class="tbl"><thead><tr><th>' + esc(t('fs.h.month')) + '</th><th>' + esc(t('fs.h.set')) +
+           '</th><th>' + esc(t('fs.h.paid')) + '</th><th>' + esc(t('fs.h.bal')) + '</th></tr></thead><tbody>' +
+        ms.slice().reverse().map(function (m) {
+          return '<tr><td>' + esc(monthText(m.month)) + '</td><td>' + fmt(m.setAside) + '</td><td>' + fmt(m.paid) + '</td><td class="' + (m.balance < 0 ? 'neg' : '') + '">' +
+                 (m.balance < 0 ? '-' : '') + fmt(m.balance) + '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    h += '<h3 class="sec">' + esc(t('fs.payments')) + '</h3>';
+    if (!d.paymentCount) {
+      h += '<p class="hint">' + esc(t('fs.nopay')) + '</p>';
+    } else {
+      h += '<p class="hint" style="margin:0 0 4px">' + esc(tn('fs.total', d.paymentCount, { amt: money(d.paymentTotal) })) + '</p>' +
+        d.payments.map(function (p) {
+          return '<div class="qrow"><div><b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.person) + '</div><div class="meta">' + esc(p.date) + ' ' + esc(p.time) +
+                 (p.payment ? ' &middot; ' + esc(p.payment) : '') + (p.remarks ? ' &middot; ' + esc(p.remarks) : '') + '</div></div>';
+        }).join('');
+      if (d.paymentCount > d.payments.length) h += '<p class="meta">' + esc(t('fs.more', { n: d.payments.length, total: d.paymentCount })) + '</p>';
+    }
+    h += '<button class="primary" type="button" data-fspay="' + esc(f.name) + '">' + esc(t('fs.paybtn')) + '</button>';
+    if (stale) h += t('m.last');
+    $('fsBody').innerHTML = h;
+  }
+  async function loadFunds() {
+    var list = (cfg && cfg.funds) || [];
+    fill($('fsPick'), list.map(function (f) { return f.name; }));
+    if (!cfg) { $('fsBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>'; return; }
+    if (!list.length) { $('fsBody').innerHTML = '<p class="hint">' + esc(t('fs.none')) + '</p>'; return; }
+    if (fsFund && list.some(function (f) { return f.name === fsFund; })) $('fsPick').value = fsFund;
+    var name = $('fsPick').value; fsFund = name;
+    var key = 'fund:' + norm(name);
+    var cached = await Core.kvGet(key);
+    if (cached) showFund(cached, true); else $('fsBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>';
+    if (!conn || !conn.token) return;
+    try {
+      var r = await Core.api(conn, 'fund_statement', { fund: name });
+      if (name !== $('fsPick').value) return;
+      if (r && r.ok) { await Core.kvSet(key, r); showFund(r, false); }
+      else if (r && r.error === 'Not authorised') needAuth(t('auth.short'));
+      else if (!cached) $('fsBody').innerHTML = '<p class="hint">' + esc(errText((r && r.error) || '')) + '</p>';
+    } catch (e) {
+      if (!cached) $('fsBody').innerHTML = t('fs.offline');
+    }
+  }
+
   // ---------- events ----------
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
     b.addEventListener('click', function () { switchTab(b.getAttribute('data-tab')); });
@@ -813,6 +877,15 @@
   $('amount').addEventListener('input', renderPreview);
   $('date').addEventListener('change', renderPreview);
   $('monPeriod').addEventListener('change', loadMonth);
+  $('fsPick').addEventListener('change', function () { fsFund = $('fsPick').value; loadFunds(); });
+  $('fsBody').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button[data-fspay]');
+    if (b) { switchTab('add'); chooseFund(norm(b.getAttribute('data-fspay'))); }
+  });
+  $('monBody').addEventListener('click', function (ev) {
+    var a = ev.target.closest('a[data-fs]');
+    if (a) { fsFund = a.getAttribute('data-fs'); switchTab('funds'); }
+  });
   $('fundChips').addEventListener('click', function (ev) {
     var b = ev.target.closest('button'); if (b) chooseFund(norm(b.getAttribute('data-fundchip')));
   });
@@ -930,7 +1003,7 @@
     var n = queue.length;
     if (!confirm(n ? t('reset.confirm.n', { n: n }) : t('reset.confirm'))) return;
     ['conn', 'cfg', 'pin', 'bio', 'prefs', 'favs', 'recent', 'fundNoteDay'].forEach(function (k) { Core.kvDel(k); });
-    (await Core.kvKeys()).forEach(function (k) { if (/^(summary|month):/.test(String(k))) Core.kvDel(k); });
+    (await Core.kvKeys()).forEach(function (k) { if (/^(summary|month|fund):/.test(String(k))) Core.kvDel(k); });
     await Core.qClear();
     conn = null; cfg = null; pinRec = null; bioRec = null; queue = []; favs = []; prefs = {}; recent = []; fundNoteDay = ''; forceActivate = false; forgot = false; formReady = false;
     say('', ''); route();
