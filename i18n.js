@@ -7,12 +7,17 @@
 
   STR.en = {
     // ---- Funds tab (the statement for one fund)
-    'tab.funds': `Funds`, 'fs.pick': `Fund`, 'fs.balance': `Balance`, 'fs.collected': `Set aside so far`, 'fs.paid': `Paid out`,
+    'tab.funds': `Funds`, 'fs.pick': `Fund`, 'fs.balance': `Balance`, 'fs.collected': `Collected so far`, 'fs.paid': `Spent / dispersed`,
     'fs.target': `Target`, 'fs.togo': `Still to reach`, 'fs.opening': `Opening balance {amt}`,
     'fs.notarget': `No target is set for this fund. Add an amount and a date in Settings (columns N and O).`,
-    'fs.months': `Month by month`, 'fs.h.month': `Month`, 'fs.h.set': `Set aside`, 'fs.h.paid': `Paid`, 'fs.h.bal': `Balance`,
-    'fs.payments': `Payments`, 'fs.nopay': `No payments from this fund yet.`,
-    'fs.total.one': `{n} payment, {amt} in total`, 'fs.total.other': `{n} payments, {amt} in total`,
+    'fs.months': `Month by month`, 'fs.h.month': `Month`, 'fs.h.set': `Collected`, 'fs.h.paid': `Spent`, 'fs.h.bal': `Balance`,
+    'fs.deposits': `Deposits (monthly collection)`, 'fs.spending': `Spending / dispersals`,
+    'fs.nodep': `No deposits recorded yet. Monthly collections appear here when they come from the Recurring tab.`,
+    'fs.nospend': `No spending from this fund yet.`,
+    'fs.dep.total.one': `{n} deposit, {amt} in total`, 'fs.dep.total.other': `{n} deposits, {amt} in total`,
+    'fs.spend.total.one': `{n} payment, {amt} in total`, 'fs.spend.total.other': `{n} payments, {amt} in total`,
+    'fs.earlier.one': `{n} earlier entry (before {month}) is listed in grey but not counted: the opening balance covers it.`,
+    'fs.earlier.other': `{n} earlier entries (before {month}) are listed in grey but not counted: the opening balance covers them.`,
     'fs.more': `Showing the latest {n} of {total}.`, 'fs.paybtn': `Pay from this fund`,
     'fs.none': `No funds yet. Add one from the sheet menu: Expense Tracker > Add a fund.`,
     'fs.offline': `<p class="hint">Connect to the internet to see this fund. After that it is kept on your phone.</p>`,
@@ -139,12 +144,17 @@
   };
 
   STR.ur = {
-    'tab.funds': `فنڈز`, 'fs.pick': `فنڈ`, 'fs.balance': `بیلنس`, 'fs.collected': `اب تک الگ رکھے`, 'fs.paid': `ادا شدہ`,
+    'tab.funds': `فنڈز`, 'fs.pick': `فنڈ`, 'fs.balance': `بیلنس`, 'fs.collected': `اب تک جمع`, 'fs.paid': `خرچ / ادائیگی`,
     'fs.target': `ہدف`, 'fs.togo': `ہدف تک باقی`, 'fs.opening': `ابتدائی بیلنس {amt}`,
     'fs.notarget': `اس فنڈ کا ہدف مقرر نہیں۔ Settings میں رقم اور تاریخ ڈالیں (کالم N اور O)۔`,
-    'fs.months': `مہینہ بہ مہینہ`, 'fs.h.month': `مہینہ`, 'fs.h.set': `الگ رکھے`, 'fs.h.paid': `ادا`, 'fs.h.bal': `بیلنس`,
-    'fs.payments': `ادائیگیاں`, 'fs.nopay': `اس فنڈ سے ابھی کوئی ادائیگی نہیں۔`,
-    'fs.total.one': `{n} ادائیگی، کل {amt}`, 'fs.total.other': `{n} ادائیگیاں، کل {amt}`,
+    'fs.months': `مہینہ بہ مہینہ`, 'fs.h.month': `مہینہ`, 'fs.h.set': `جمع`, 'fs.h.paid': `خرچ`, 'fs.h.bal': `بیلنس`,
+    'fs.deposits': `جمع شدہ رقم (ماہانہ کلیکشن)`, 'fs.spending': `خرچ / ادائیگیاں`,
+    'fs.nodep': `ابھی کوئی جمع شدہ رقم درج نہیں۔ ماہانہ کلیکشن Recurring ٹیب سے آنے پر یہاں نظر آئے گی۔`,
+    'fs.nospend': `اس فنڈ سے ابھی کوئی خرچ نہیں۔`,
+    'fs.dep.total.one': `{n} جمع، کل {amt}`, 'fs.dep.total.other': `{n} جمع رقمیں، کل {amt}`,
+    'fs.spend.total.one': `{n} ادائیگی، کل {amt}`, 'fs.spend.total.other': `{n} ادائیگیاں، کل {amt}`,
+    'fs.earlier.one': `{n} پرانا اندراج ({month} سے پہلے کا) سرمئی رنگ میں دکھایا گیا ہے مگر شمار نہیں ہوا: ابتدائی بیلنس میں شامل ہے۔`,
+    'fs.earlier.other': `{n} پرانے اندراجات ({month} سے پہلے کے) سرمئی رنگ میں دکھائے گئے ہیں مگر شمار نہیں ہوئے: ابتدائی بیلنس میں شامل ہیں۔`,
     'fs.more': `{total} میں سے تازہ ترین {n} دکھائے جا رہے ہیں۔`, 'fs.paybtn': `اس فنڈ سے ادائیگی کریں`,
     'fs.none': `ابھی کوئی فنڈ نہیں۔ شیٹ کے مینو سے شامل کریں: Expense Tracker > Add a fund۔`,
     'fs.offline': `<p class="hint">یہ فنڈ دیکھنے کے لیے انٹرنیٹ سے جڑیں۔ اس کے بعد یہ آپ کے فون میں محفوظ رہتا ہے۔</p>`,

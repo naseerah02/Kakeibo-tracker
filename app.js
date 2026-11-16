@@ -810,11 +810,25 @@
   function monthText(ym) { return I18N.label(MON3[+ym.slice(5, 7) - 1] + ' ' + ym.slice(0, 4)); }
   function signed(n) { return (n < 0 ? '-' : '') + money(n); }
 
+  // Rows for deposits or for spending. Entries from before the ledger started are shown in grey (and not counted).
+  function entryRows(list) {
+    return list.map(function (e) {
+      return '<div class="qrow' + (e.counted ? '' : ' old') + '"><div><b>' + esc(money(e.amount)) + '</b> &middot; ' + esc(e.person) + '</div><div class="meta">' + esc(e.date) + ' ' + esc(e.time) +
+             (e.payment ? ' &middot; ' + esc(e.payment) : '') + (e.remarks ? ' &middot; ' + esc(e.remarks) : '') + '</div></div>';
+    }).join('');
+  }
+  function entrySection(title, emptyKey, totalKey, list, count, total) {
+    var h = '<h3 class="sec">' + esc(title) + '</h3>';
+    if (!list.length) return h + '<p class="hint">' + esc(t(emptyKey)) + '</p>';
+    h += '<p class="hint" style="margin:0 0 4px">' + esc(tn(totalKey, count, { amt: money(total) })) + '</p>' + entryRows(list);
+    if (list.length >= 100) h += '<p class="meta">' + esc(t('fs.more', { n: 100, total: '100+' })) + '</p>';
+    return h;
+  }
   function showFund(d, stale) {
     var f = d.fund, h = '';
     h += '<div class="kpis"><div><small>' + esc(t('fs.balance')) + '</small><b class="' + (f.balance < 0 ? 'neg' : '') + '">' + signed(f.balance) + '</b></div>' +
-         '<div><small>' + esc(t('fs.collected')) + '</small><b>' + money(f.setAsideToDate) + '</b></div>' +
-         '<div><small>' + esc(t('fs.paid')) + '</small><b>' + money(f.paidToDate) + '</b></div></div>';
+         '<div><small>' + esc(t('fs.collected')) + '</small><b>' + money(f.collectedToDate) + '</b></div>' +
+         '<div><small>' + esc(t('fs.paid')) + '</small><b>' + money(f.spentToDate) + '</b></div></div>';
     if (f.opening) h += '<p class="meta" style="margin:0 0 6px">' + esc(t('fs.opening', { amt: money(f.opening) })) + '</p>';
     if (f.target > 0 && f.targetDate) {
       h += '<div class="kpis"><div><small>' + esc(t('fs.target')) + '</small><b>' + money(f.target) + '</b></div>' +
@@ -827,21 +841,13 @@
       h += '<h3 class="sec">' + esc(t('fs.months')) + '</h3><table class="tbl"><thead><tr><th>' + esc(t('fs.h.month')) + '</th><th>' + esc(t('fs.h.set')) +
            '</th><th>' + esc(t('fs.h.paid')) + '</th><th>' + esc(t('fs.h.bal')) + '</th></tr></thead><tbody>' +
         ms.slice().reverse().map(function (m) {
-          return '<tr><td>' + esc(monthText(m.month)) + '</td><td>' + fmt(m.setAside) + '</td><td>' + fmt(m.paid) + '</td><td class="' + (m.balance < 0 ? 'neg' : '') + '">' +
+          return '<tr><td>' + esc(monthText(m.month)) + '</td><td>' + fmt(m.collected) + '</td><td>' + fmt(m.spent) + '</td><td class="' + (m.balance < 0 ? 'neg' : '') + '">' +
                  (m.balance < 0 ? '-' : '') + fmt(m.balance) + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
-    h += '<h3 class="sec">' + esc(t('fs.payments')) + '</h3>';
-    if (!d.paymentCount) {
-      h += '<p class="hint">' + esc(t('fs.nopay')) + '</p>';
-    } else {
-      h += '<p class="hint" style="margin:0 0 4px">' + esc(tn('fs.total', d.paymentCount, { amt: money(d.paymentTotal) })) + '</p>' +
-        d.payments.map(function (p) {
-          return '<div class="qrow"><div><b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.person) + '</div><div class="meta">' + esc(p.date) + ' ' + esc(p.time) +
-                 (p.payment ? ' &middot; ' + esc(p.payment) : '') + (p.remarks ? ' &middot; ' + esc(p.remarks) : '') + '</div></div>';
-        }).join('');
-      if (d.paymentCount > d.payments.length) h += '<p class="meta">' + esc(t('fs.more', { n: d.payments.length, total: d.paymentCount })) + '</p>';
-    }
+    h += entrySection(t('fs.deposits'), 'fs.nodep', 'fs.dep.total', d.deposits || [], d.depositCount || 0, d.depositTotal || 0);
+    h += entrySection(t('fs.spending'), 'fs.nospend', 'fs.spend.total', d.dispersals || [], d.dispersalCount || 0, d.dispersalTotal || 0);
+    if (d.earlierCount) h += '<p class="meta">' + esc(tn('fs.earlier', d.earlierCount, { month: monthText(f.ledgerStart) })) + '</p>';
     h += '<button class="primary" type="button" data-fspay="' + esc(f.name) + '">' + esc(t('fs.paybtn')) + '</button>';
     if (stale) h += t('m.last');
     $('fsBody').innerHTML = h;
@@ -855,7 +861,7 @@
     var name = $('fsPick').value; fsFund = name;
     var key = 'fund:' + norm(name);
     var cached = await Core.kvGet(key);
-    if (cached) showFund(cached, true); else $('fsBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>';
+    if (cached && cached.v === 2) showFund(cached, true); else { cached = null; $('fsBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>'; }   // a statement saved by an older version is ignored
     if (!conn || !conn.token) return;
     try {
       var r = await Core.api(conn, 'fund_statement', { fund: name });
