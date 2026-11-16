@@ -5,8 +5,8 @@
  * This script is the "server" for the Android app. Everything lives in this Google Sheet:
  *   Expenses     one row per expense
  *   Settings     summary email, currency, budget warning %, categories (+ Kakeibo type, fixed?), people + emails, payment modes, funds
- *   Plan         monthly household plan (income, fixed costs, savings goal, Zakat/Qurbani set-aside)
- *   Funds        Zakat and Qurbani ledger (set-aside, paid, balance)
+ *   Plan         monthly household plan (income, fixed costs, savings goal, and a monthly set-aside for each fund)
+ *   Funds        ledger for each fund: collected (the Recurring tab's deposits, or the Plan's set-aside), spent, balance
  *   Recurring    expenses added automatically every month (rent, subscriptions...)
  *   Reflections  weekly / monthly Kakeibo reflections written in the app
  *   Devices      phones that signed in (revoke one by setting its Status to Revoked)
@@ -179,10 +179,16 @@ function colLetter_(n) {
   return s;
 }
 
+const FUNDS_WIDTH = 33;   // columns A to AG on the Funds tab
+
 /**
- * Builds the Funds tab from the funds listed in Settings (L:M), one column for each fund in three blocks:
- * set-aside (B:I), paid (J:Q) and balance (R:Y). Safe to re-run: it keeps the opening balances you typed in row 2.
- * Fund number i (Settings row i + 2) uses Plan column H + i for its monthly set-aside.
+ * Builds the Funds tab from the funds listed in Settings (L:M), one column for each fund in four blocks:
+ * collected (B:I), spent (J:Q), balance (R:Y) and deposits (Z:AG).
+ *  - A DEPOSIT is an entry in the fund's category made by the Recurring tab (Device Name "Recurring"): the monthly collection.
+ *  - Collected for a month = the deposits recorded that month. If none were recorded, the Plan's monthly set-aside for that fund.
+ *  - Spent = every other entry in the fund's category (what you enter with "Pay from a fund").
+ *  - Balance = opening balance + collected - spent.
+ * Fund number i (Settings row i + 2) uses Plan column H + i. Safe to re-run: it keeps the opening balances typed in row 2.
  */
 function buildFundsSheet_(ss) {
   const fu = ss.getSheetByName(FUNDS) || ss.insertSheet(FUNDS);
@@ -194,13 +200,14 @@ function buildFundsSheet_(ss) {
     } catch (e) { /* start with zeros */ }
   }
   fu.clear();
+  try { const mc = Number(fu.getMaxColumns()); if (isFinite(mc) && mc < FUNDS_WIDTH) fu.insertColumnsAfter(mc, FUNDS_WIDTH - mc); } catch (e) { /* enough columns already */ }
   fu.getRange('A1').setValue('Earmarked funds').setFontSize(16).setFontWeight('bold');
   fu.getRange('A2').setValue('Opening balance').setFontWeight('bold');
   fu.getRange(2, 2, 1, MAX_FUNDS).setValues([opening]).setBackground('#fff8dc').setNumberFormat('#,##0');
-  fu.getRange(2, 2 + MAX_FUNDS).setValue('Money already set aside before the first month on the Plan tab (yellow cells, one per fund in the order of Settings).');
+  fu.getRange(2, 2 + MAX_FUNDS).setValue('Money already in the fund before the first month on the Plan tab (yellow cells, one per fund in the order of Settings).');
 
   const heads = [];
-  [' set-aside', ' paid', ' balance'].forEach(function (suffix) {
+  [' collected', ' spent', ' balance', ' deposits'].forEach(function (suffix) {
     for (let i = 0; i < MAX_FUNDS; i++) heads.push('=IF(Settings!$L' + (2 + i) + '="","",Settings!$L' + (2 + i) + '&"' + suffix + '")');
   });
   fu.getRange('A3').setValue('Month');
@@ -210,21 +217,24 @@ function buildFundsSheet_(ss) {
   const rows = [];
   for (let r = 4; r <= 39; r++) {
     const row = [r === 4 ? '=Plan!$A$4' : '=EDATE(A' + (r - 1) + ',1)'];
-    const set = [], paid = [], bal = [];
+    const set = [], paid = [], bal = [], dep = [];
     for (let i = 0; i < MAX_FUNDS; i++) {
-      const planCol = colLetter_(8 + i), sc = colLetter_(2 + i), pc = colLetter_(2 + MAX_FUNDS + i);
-      set.push('=IF(Settings!$L' + (2 + i) + '="",0,N(IFERROR(ARRAYFORMULA(LOOKUP(2,1/((Plan!$A$4:$A$39<>"")*(Plan!$A$4:$A$39<=$A' + r + ')),Plan!$' + planCol + '$4:$' + planCol + '$39)),0)))');
-      paid.push('=IF(Settings!$M' + (2 + i) + '="",0,SUMIFS(Expenses!$E$2:$E,Expenses!$D$2:$D,Settings!$M' + (2 + i) + ',Expenses!$A$2:$A,">="&$A' + r + ',Expenses!$A$2:$A,"<"&EDATE($A' + r + ',1)))');
+      const planCol = colLetter_(8 + i), sc = colLetter_(2 + i), pc = colLetter_(2 + MAX_FUNDS + i), dc = colLetter_(2 + 3 * MAX_FUNDS + i);
+      const month = 'Expenses!$A$2:$A,">="&$A' + r + ',Expenses!$A$2:$A,"<"&EDATE($A' + r + ',1)';
+      set.push('=IF(Settings!$L' + (2 + i) + '="",0,IF(N(' + dc + r + ')>0,' + dc + r +
+               ',N(IFERROR(ARRAYFORMULA(LOOKUP(2,1/((Plan!$A$4:$A$39<>"")*(Plan!$A$4:$A$39<=$A' + r + ')),Plan!$' + planCol + '$4:$' + planCol + '$39)),0))))');
+      paid.push('=IF(Settings!$M' + (2 + i) + '="",0,SUMIFS(Expenses!$E$2:$E,Expenses!$D$2:$D,Settings!$M' + (2 + i) + ',' + month + ')-N(' + dc + r + '))');
       bal.push('=' + sc + '$2+SUM(' + sc + '$4:' + sc + r + ')-SUM(' + pc + '$4:' + pc + r + ')');
+      dep.push('=IF(Settings!$M' + (2 + i) + '="",0,SUMIFS(Expenses!$E$2:$E,Expenses!$D$2:$D,Settings!$M' + (2 + i) + ',Expenses!$H$2:$H,"Recurring",' + month + '))');
     }
-    rows.push(row.concat(set, paid, bal));
+    rows.push(row.concat(set, paid, bal, dep));
   }
-  fu.getRange(4, 1, rows.length, 1 + 3 * MAX_FUNDS).setFormulas(rows);
+  fu.getRange(4, 1, rows.length, 1 + 4 * MAX_FUNDS).setFormulas(rows);
   fu.getRange('A4:A39').setNumberFormat('mmm yyyy');
-  fu.getRange(4, 2, 36, 3 * MAX_FUNDS).setNumberFormat('#,##0');
+  fu.getRange(4, 2, 36, 4 * MAX_FUNDS).setNumberFormat('#,##0');
   fu.setFrozenRows(3); fu.setFrozenColumns(1);
   fu.setColumnWidth(1, 120);
-  fu.setColumnWidths(2, 3 * MAX_FUNDS, 120);
+  fu.setColumnWidths(2, 4 * MAX_FUNDS, 120);
 }
 
 /** Adds an "Expense Tracker" menu to the sheet (it appears when the sheet is opened or reloaded). */
@@ -758,8 +768,10 @@ function fundBalances_(dateStr) {
 // ======================================================================
 
 /**
- * Everything about one fund up to today: the totals, the month-by-month ledger from the Funds tab, progress towards the
- * target, and every payment made from it (any person) with the newest first. p.fund is the fund's name.
+ * Everything about one fund up to today, for the app's Funds tab: the totals, the month-by-month ledger, progress towards the
+ * target, and the entries split into DEPOSITS (the monthly collection made by the Recurring tab) and SPENDING / DISPERSALS
+ * (every other entry in the fund's category, made with "Pay from a fund"). Newest first. p.fund is the fund's name.
+ * Entries dated before the first Plan month are listed but not counted: the opening balance already covers them.
  */
 function fundStatement_(p) {
   const cfg = getConfig_(), want = norm_(p.fund);
@@ -767,40 +779,51 @@ function fundStatement_(p) {
   const ss = SpreadsheetApp.getActiveSpreadsheet(), fu = ss.getSheetByName(FUNDS);
   if (!f || !fu) return { ok: false, error: 'Fund not found' };
   const today = today_();
+  let width = FUNDS_WIDTH;
+  try { const mc = Number(fu.getMaxColumns()); if (isFinite(mc)) width = Math.min(FUNDS_WIDTH, mc); } catch (e) { /* use the full width */ }
+  const at = function (r, i) { return i < r.length ? Math.round(Number(r[i]) || 0) : 0; };
 
   const opening = Math.round(Number(fu.getRange(2, 2 + f.slot).getValue()) || 0);
   const months = [];
-  fu.getRange('A4:Y39').getValues().forEach(function (r) {
+  let ledgerStart = '';
+  fu.getRange(4, 1, 36, width).getValues().forEach(function (r) {
     if (!(r[0] instanceof Date)) return;
     const d = dayStr_(r[0]);
+    if (!ledgerStart) ledgerStart = d.slice(0, 7);
     if (d > today) return;                                   // months still to come are not part of the statement
-    months.push({ month: d.slice(0, 7), setAside: Math.round(Number(r[1 + f.slot]) || 0),
-                  paid: Math.round(Number(r[9 + f.slot]) || 0), balance: Math.round(Number(r[17 + f.slot]) || 0) });
+    months.push({ month: d.slice(0, 7), collected: at(r, 1 + f.slot), spent: at(r, 9 + f.slot), balance: at(r, 17 + f.slot), deposits: at(r, 25 + f.slot) });
   });
-  let setAside = opening, paid = 0;
-  months.forEach(function (m) { setAside += m.setAside; paid += m.paid; });
+  let collected = opening, spent = 0;
+  months.forEach(function (m) { collected += m.collected; spent += m.spent; });
   const balance = months.length ? months[months.length - 1].balance : opening;
 
   const t = fundTargets_(today).filter(function (x) { return x.category === f.category; })[0] || {};
 
-  const ex = ss.getSheetByName(EXPENSES), last = ex.getLastRow(), pay = [];
+  const ex = ss.getSheetByName(EXPENSES), last = ex.getLastRow(), deposits = [], dispersals = [];
   if (last > 1) {
     ex.getRange(2, 1, last - 1, 11).getValues().forEach(function (r) {
       if (!(r[0] instanceof Date) || String(r[3]) !== f.category) return;
-      pay.push({ date: dayStr_(r[0]), time: timeStr_(r[2]), amount: Number(r[4]) || 0, person: String(r[8] || ''),
-                 payment: String(r[5] || ''), remarks: String(r[6] || '') });
+      const date = dayStr_(r[0]);
+      const e = { date: date, time: timeStr_(r[2]), amount: Number(r[4]) || 0, person: String(r[8] || ''), payment: String(r[5] || ''), remarks: String(r[6] || ''),
+                  counted: !!ledgerStart && date.slice(0, 7) >= ledgerStart && date <= today };
+      (String(r[7]) === 'Recurring' ? deposits : dispersals).push(e);
     });
   }
-  pay.sort(function (a, b) { return (b.date + b.time).localeCompare(a.date + a.time); });
-  const total = pay.reduce(function (sum, x) { return sum + x.amount; }, 0);
+  const newest = function (a, b) { return (b.date + b.time).localeCompare(a.date + a.time); };
+  deposits.sort(newest); dispersals.sort(newest);
+  const sum = function (list) { return Math.round(list.filter(function (e) { return e.counted; }).reduce(function (s2, e) { return s2 + e.amount; }, 0)); };
+  const cnt = function (list) { return list.filter(function (e) { return e.counted; }).length; };
 
   return {
-    ok: true,
-    fund: { name: f.name, category: f.category, opening: opening, setAsideToDate: setAside, paidToDate: paid, balance: balance,
+    ok: true, v: 2,
+    fund: { name: f.name, category: f.category, opening: opening, collectedToDate: collected, spentToDate: spent, balance: balance, ledgerStart: ledgerStart,
             target: t.target || 0, targetDate: t.targetDate || '', status: t.status || 'none', progress: t.progress || 0,
             remaining: t.remaining || 0, needed: t.needed || 0, planned: t.planned || 0,
             daysLeft: t.daysLeft, projected: t.projected, shortfall: t.shortfall },
-    months: months, payments: pay.slice(0, 100), paymentCount: pay.length, paymentTotal: Math.round(total)
+    months: months,
+    deposits: deposits.slice(0, 100), depositCount: cnt(deposits), depositTotal: sum(deposits),
+    dispersals: dispersals.slice(0, 100), dispersalCount: cnt(dispersals), dispersalTotal: sum(dispersals),
+    earlierCount: deposits.length + dispersals.length - cnt(deposits) - cnt(dispersals)
   };
 }
 
@@ -1412,7 +1435,7 @@ function buildDashboard() {
 
   // Earmarked funds from the Funds tab (rows 50-59: one row for each fund listed in Settings)
   sh.getRange('A50').setValue('Earmarked funds').setFontWeight('bold').setFontSize(12);
-  sh.getRange('A51:H51').setValues([['Fund', 'Set aside to date', 'Paid out to date', 'Balance', 'Paid this month', 'Target', 'Target date', 'Needed / month']]);
+  sh.getRange('A51:H51').setValues([['Fund', 'Collected to date', 'Spent to date', 'Balance', 'Spent this month', 'Target', 'Target date', 'Needed / month']]);
   const fn = [];
   for (let i = 0; i < MAX_FUNDS; i++) {
     const r = 52 + i, sc = colLetter_(2 + i), pc = colLetter_(2 + MAX_FUNDS + i);
