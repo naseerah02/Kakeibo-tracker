@@ -1,4 +1,4 @@
-# Kakeibo Family Expense Tracker (Android, v2.6)
+# Kakeibo Family Expense Tracker (Android, v2.7)
 
 A private family expense tracker built on a Google Sheet and an installable Android app. Log an expense in a few taps, even with no internet. Each phone signs in with an emailed code and a PIN, and everything lands in one shared sheet with a dashboard based on the Japanese **Kakeibo** budgeting method.
 
@@ -44,7 +44,7 @@ A private family expense tracker built on a Google Sheet and an installable Andr
 | **Budget warnings** | The budget banner turns amber when you have used 80% of the week's or month's allowance (you choose the level) and red when you are over. Under the amount, a preview shows what the purchase would do before you save it. |
 | **Category limits** | An optional monthly limit for any category (for example Food & Dining). You get a note when one is nearly used up, a preview before you save, and the Month tab, the Dashboard and the emails show it. |
 | **Urdu** | The whole app can be switched to Urdu (اردو), right to left, with one tap. |
-| **Fund statement** | A **Funds** tab with a statement for each fund: balance, collected so far, spent, progress to the target, a month-by-month table, and two separate lists: **deposits** (the monthly collection) and **spending / dispersals**, each with its own count and total. |
+| **Fund statement** | A **Funds** tab with a statement for each fund: balance, collected so far, spent, progress to the target, a month-by-month table, and two separate lists: **deposits** and **spending / dispersals**, each with its own count and total. Buttons to **deposit to** or **pay from** the fund. |
 | **Month** | A month summary inside the app: key figures, Kakeibo split, categories, weeks, days and fund balances. |
 | **Shortcuts** | Long-press the app icon for Add expense, Pay Zakat, History and Month summary. |
 | **Offline** | Entries are queued on the phone and sent later, also in the background when Android allows. |
@@ -108,7 +108,7 @@ README.md                  This file
 
 | Tab | Purpose |
 |---|---|
-| `Expenses` | One row per expense: Date, Month, Time, Category, Amount, Payment Mode, Remarks, Device Name, Person, ID, Kakeibo Type |
+| `Expenses` | One row per expense: Date, Month, Time, Category, Amount, Payment Mode, Remarks, Device Name, Person, ID, Kakeibo Type, Fund Action |
 | `Settings` | Summary email (B2), currency (B3), budget warning level (B4), categories with Kakeibo type, fixed flag and monthly limit (D to G), people with emails, payment modes, fund links and fund targets |
 | `Plan` | One row per month: income, planned fixed costs, savings goal, and a monthly set-aside column for each fund (H to O) |
 | `Funds` | Monthly ledger with a collected, spent, balance and deposits column for each fund (rebuilt automatically from the funds listed in Settings) |
@@ -250,6 +250,13 @@ The repository holds only code. It has no keys and no data.
 
 **Check your fund balances afterwards.** Entries from the Recurring tab in a fund's category used to be counted as spending, and are now deposits, so balances that included them will go **up** by those amounts. That is the correction, not a fault. The Dashboard headings changed from "Set aside to date / Paid out to date / Paid this month" to "Collected to date / Spent to date / Spent this month".
 
+### From version 2.6 to 2.7
+
+1. Paste the new `Code.gs`, save, and run **setup** (safe to re-run). It adds the **Fund Action** column (`Expenses` column L) and rebuilds the `Funds` tab so manual deposits are counted. Your opening balances, Plan, expenses and settings are kept.
+2. **Deploy > Manage deployments > pencil > New version > Deploy.**
+3. Upload `index.html`, `app.js`, `i18n.js` and `sw.js` to GitHub, replacing the old ones.
+4. Open the app online on each phone. The Funds tab now has a green **Deposit to this fund** button.
+
 ---
 
 ## Daily use
@@ -274,6 +281,7 @@ The **History** tab lists your latest entries (up to 40), including ones still w
 - **Delete** removes it after a confirmation.
 - Changing or deleting an entry that is **already in the sheet needs internet**. Entries still waiting on the phone can be edited or deleted offline.
 - You can only change your own entries. Every edit and delete is recorded in the `Audit` tab.
+- Deposits to a fund (including the monthly collection from the Recurring tab) are tagged **Deposit**.
 - Rows without an ID (typed into the sheet by hand, or saved before version 2) do not appear. Correct those in the sheet.
 
 ### Budget warnings
@@ -343,7 +351,10 @@ The **Funds** tab shows one fund at a time. Choose the fund at the top (Zakat, Q
 
 Each list shows at most the latest 100 entries. An entry dated **before the first month on the Plan tab** is shown in grey and is **not counted** in the totals, because the opening balance already covers it. A note under the lists says how many.
 
-The **Pay from this fund** button at the bottom opens the form with that fund's category already chosen.
+Two buttons sit at the bottom:
+
+- **Deposit to this fund** (green) opens the form in **deposit mode** for that fund, for money you add to it by hand, such as an extra contribution. A banner says "Depositing to the Zakat fund. This adds money to the fund; it is not an expense." and the button reads **Save deposit**. The entry is recorded as a deposit with type Savings, so it raises the balance and does not affect your budget. Deposit mode ends after you save, or if you tap Cancel, choose a different category, or tap a "Pay from a fund" button.
+- **Pay from this fund** opens the normal form with that fund's category already chosen, for money paid out of the fund.
 
 If a fund has no target, the screen says how to add one. A fund you have opened once is kept on the phone, so it still shows offline, marked "Last loaded numbers".
 
@@ -500,7 +511,7 @@ If the dashboard looks wrong after a change, run `buildDashboard()`. It only reb
 
 A fund is money you build up over months and pay out later, so it is **earmarked**. Zakat and Qurbani are set up for you, and you can [add your own](#adding-your-own-funds). Every fund works the same way:
 
-1. **Money in: deposits.** The usual way is a **monthly collection** on the `Recurring` tab: a row with the fund's category (for example **Zakat 🤲**), the amount, and payment mode such as Bank Transfer. The script adds it every month, and because it comes from the Recurring tab it is recorded as a **deposit**. If you do not record a deposit for a month, the Plan's set-aside for that fund is counted instead, so you can also work without logging anything. A month with a recorded deposit uses the deposit, so nothing is counted twice.
+1. **Money in: deposits.** There are two ways. For money you add **by hand**, use **Deposit to this fund** on the Funds tab. The usual regular way is a **monthly collection** on the `Recurring` tab: a row with the fund's category (for example **Zakat 🤲**), the amount, and payment mode such as Bank Transfer. The script adds it every month, and because it comes from the Recurring tab it is recorded as a **deposit**. If you do not record a deposit for a month, the Plan's set-aside for that fund is counted instead, so you can also work without logging anything. A month with a recorded deposit uses the deposit, so nothing is counted twice.
 2. **Money out: spending / dispersal.** Log the payment under the fund's category in the app, for example **Zakat 🤲**, or tap the fund's button under "Pay from a fund" on the Add tab. These categories are type **Savings**, so a payment does not reduce your monthly budget.
 3. **Balance:** opening balance + collected - spent. The app shows the balance after each payment, and it turns red if more was spent than collected.
 
@@ -537,11 +548,11 @@ Every entry in a fund's category is one of two kinds, decided by **where it came
 
 | Kind | What it is | How it is made |
 |---|---|---|
-| **Deposit** | Money collected into the fund (the monthly collection) | Added by the **Recurring tab**. The entry's Device Name is `Recurring`. |
+| **Deposit** | Money collected into the fund | Added by the **Recurring tab** (the monthly collection; the entry's Device Name is `Recurring`), or by the app's **Deposit to this fund** button (the entry's *Fund Action* column says `Deposit`). |
 | **Spending / dispersal** | Money paid out of the fund | Everything else: the **Pay from a fund** button, any other entry in the app, or a row you type by hand in `Expenses`. |
 
 - **Setting up the monthly collection.** On the `Recurring` tab add a row: Name (for example "Zakat collection"), the amount, the fund's category (for example Zakat 🤲), payment mode (for example Bank Transfer), remarks (for example "Monthly collection"), the person, the day of the month, and Active = Yes. Each month the entry appears in `Expenses` and is counted as a deposit.
-- **A deposit you add by hand.** An entry typed directly in `Expenses` counts as spending unless its Device Name is exactly `Recurring`. For a one-off extra deposit, set that cell to `Recurring`.
+- **A deposit typed directly in the sheet.** A row typed by hand in `Expenses` counts as spending unless its Device Name is exactly `Recurring` or its **Fund Action** cell (column L) says `Deposit`. Use the app's Deposit button where you can: it fills this in for you and only accepts a fund's own category.
 - **What a payment changes.** Spending lowers the fund's **balance**. It does **not** change total spent, the weekly or monthly allowance, free to spend, category limits or the "Invested / saved" figure. It does appear in the Savings part of the Kakeibo split.
 
 **Where each number is.**
@@ -729,6 +740,8 @@ The app can be shown in **Urdu (اردو)**, laid out right to left, or in Engli
 | A monthly collection shows under **Spending** | Only entries made by the Recurring tab are deposits (Device Name `Recurring`). An entry typed by hand, or one made in the app, is spending. Set the Device Name cell to `Recurring`, or use a Recurring row. |
 | This month's deposit is not there yet | The Recurring entry is added on its day of the month. Until then the Plan's set-aside (if any) is counted for the month, and the deposit replaces it when it arrives. |
 | The Funds tab is empty or shows an error after updating | Run `setup()` once so the `Funds` tab gets the deposits columns, then reopen the tab. |
+| "Not saved: Invalid deposit" | A deposit can only go to a fund's own category. Open it from the fund's **Deposit to this fund** button, which chooses the right category. Delete the entry from the waiting list and enter it again. |
+| A deposit shows as spending | Check the entry in `Expenses`: its **Fund Action** (column L) must say `Deposit`, or its Device Name must be `Recurring`. After an upgrade, run `setup()` so the `Funds` tab counts the new column. |
 | An entry is missing from History | Only your own entries with an ID appear, and only the latest 40. |
 | No budget banner | The `Plan` tab has no income for the current month. |
 | Recurring expense was not added | `Active` must be `Yes`, the start month must have begun, and `installTriggers` must have been run. Check the day of month. |
@@ -780,7 +793,7 @@ For developers. Everything except the health check is a `POST` to the `/exec` ad
 | `otp_request` | no | `person` | `{"ok":true}` (the same reply whether or not the person exists) |
 | `otp_verify` | no | `person`, `code`, `deviceId`, `label` | `{"ok":true,"token":"...","person":"Ali"}` |
 | `config` | yes | none | currency, categories, types, fixed list, payments, `funds`, `fundTargets`, `warnAt`, `lockSeconds`, `budget` (including `weekAllowance` and `limits`) |
-| `save` (default) | yes | `amount`, `category`, `type`, `payment`, `remarks`, `device`, `date`, `time`, `id` | `{"ok":true,"type":...,"fixed":...,"saving":...,"fund":...,"budget":{...}}` |
+| `save` (default) | yes | `amount`, `category`, `type`, `payment`, `remarks`, `device`, `date`, `time`, `id`, and optionally `fundAction` | `{"ok":true,"type":...,"fixed":...,"saving":...,"deposit":...,"fund":...,"budget":{...}}`. With `fundAction: "deposit"` the entry is a deposit to a fund: the category must be a fund's own category (otherwise `Invalid deposit`) and the type becomes Savings |
 | `recent` | yes | none | `{"ok":true,"entries":[...]}` (own entries) |
 | `update` | yes | `id` plus the `save` fields | `{"ok":true,"budget":{...}}` |
 | `delete` | yes | `id` | `{"ok":true,"budget":{...}}` |
@@ -789,6 +802,7 @@ For developers. Everything except the health check is a `POST` to the `/exec` ad
 | `reflect` | yes | `kind` (`Weekly`/`Monthly`), `date`, `q1`, `q2`, `q3`, `id` | `{"ok":true}` |
 
 - `date` accepts `YYYY-MM-DD` or `DD/MM/YYYY`; `time` is `HH:mm`. Both default to now.
+- `recent` entries carry a `deposit` flag (true for Recurring collections and manual deposits).
 - `budget.limits` is a list of `{category, limit, spent}` for the month, one for each category that has a limit. It is present even when no Plan covers the month.
 - The person on an entry always comes from the token, never from the request.
 - Category and payment names match ignoring case, emoji and punctuation. Unknown values become "Other".
@@ -817,6 +831,7 @@ After installing, check each of these once:
 - [ ] Unlock the app, tap **Turn on fingerprint**, close the app and reopen it: Android asks for your fingerprint and the app opens. Cancel it once: the PIN still works
 - [ ] Tap **اردو**: every screen turns right to left in Urdu. Tap **English** and it returns. Close and reopen: the choice is kept
 - [ ] Set a Qurbani target and date in `Settings`: the Month tab shows its progress and the monthly amount needed
+- [ ] On the Funds tab tap **Deposit to this fund**, enter an amount and save: the banner, then "Deposited to your … fund: balance now …". The entry appears under **Deposits** and the balance goes up by that amount
 - [ ] Open the **Funds** tab: the balance and collected match the `Funds` tab in the sheet. The monthly bank collection is listed under **Deposits**, and a payment you make with **Pay from this fund** appears under **Spending / dispersals** with the balance dropping by that amount
 - [ ] Set the target date about 20 days away with a low balance: the Add tab shows a red fund banner, and running `checkFundReminders` sends an email once (and not a second time)
 - [ ] A Zakat or Qurbani payment shows the fund balance and does not change the weekly figure

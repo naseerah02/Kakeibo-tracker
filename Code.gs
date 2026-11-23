@@ -33,7 +33,7 @@ const RECURRING = 'Recurring';
 const REFLECTIONS = 'Reflections';
 const AUDIT = 'Audit';
 const DASHBOARD = 'Dashboard';
-const HEADERS = ['Date', 'Month', 'Time', 'Category', 'Amount', 'Payment Mode', 'Remarks', 'Device Name', 'Person', 'ID', 'Kakeibo Type'];
+const HEADERS = ['Date', 'Month', 'Time', 'Category', 'Amount', 'Payment Mode', 'Remarks', 'Device Name', 'Person', 'ID', 'Kakeibo Type', 'Fund Action'];
 const ID_COL = 10;
 const KAKEIBO_TYPES = ['Needs', 'Wants', 'Culture', 'Extra', 'Savings'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -79,6 +79,7 @@ function setup() {
     ex.getRange('E:E').setNumberFormat('#,##0.00');
   }
 
+  if (!String(ex.getRange('L1').getValue())) ex.getRange('L1').setValue('Fund Action').setFontWeight('bold');   // older sheets: "Deposit" here marks a manual deposit to a fund
   const st = ss.getSheetByName(SETTINGS) || ss.insertSheet(SETTINGS);
   if (st.getLastRow() === 0) {
     st.getRange('A1:B1').setValues([['Setting', 'Value']]).setFontWeight('bold');
@@ -184,7 +185,8 @@ const FUNDS_WIDTH = 33;   // columns A to AG on the Funds tab
 /**
  * Builds the Funds tab from the funds listed in Settings (L:M), one column for each fund in four blocks:
  * collected (B:I), spent (J:Q), balance (R:Y) and deposits (Z:AG).
- *  - A DEPOSIT is an entry in the fund's category made by the Recurring tab (Device Name "Recurring"): the monthly collection.
+ *  - A DEPOSIT is an entry in the fund's category made by the Recurring tab (Device Name "Recurring": the monthly collection),
+ *    or marked "Deposit" in the Fund Action column (the app's "Deposit to this fund" button).
  *  - Collected for a month = the deposits recorded that month. If none were recorded, the Plan's monthly set-aside for that fund.
  *  - Spent = every other entry in the fund's category (what you enter with "Pay from a fund").
  *  - Balance = opening balance + collected - spent.
@@ -225,7 +227,7 @@ function buildFundsSheet_(ss) {
                ',N(IFERROR(ARRAYFORMULA(LOOKUP(2,1/((Plan!$A$4:$A$39<>"")*(Plan!$A$4:$A$39<=$A' + r + ')),Plan!$' + planCol + '$4:$' + planCol + '$39)),0))))');
       paid.push('=IF(Settings!$M' + (2 + i) + '="",0,SUMIFS(Expenses!$E$2:$E,Expenses!$D$2:$D,Settings!$M' + (2 + i) + ',' + month + ')-N(' + dc + r + '))');
       bal.push('=' + sc + '$2+SUM(' + sc + '$4:' + sc + r + ')-SUM(' + pc + '$4:' + pc + r + ')');
-      dep.push('=IF(Settings!$M' + (2 + i) + '="",0,SUMIFS(Expenses!$E$2:$E,Expenses!$D$2:$D,Settings!$M' + (2 + i) + ',Expenses!$H$2:$H,"Recurring",' + month + '))');
+      dep.push('=IF(Settings!$M' + (2 + i) + '="",0,SUMIFS(Expenses!$E$2:$E,Expenses!$D$2:$D,Settings!$M' + (2 + i) + ',Expenses!$H$2:$H,"Recurring",' + month + ')+SUMIFS(Expenses!$E$2:$E,Expenses!$D$2:$D,Settings!$M' + (2 + i) + ',Expenses!$L$2:$L,"Deposit",' + month + '))');
     }
     rows.push(row.concat(set, paid, bal, dep));
   }
@@ -560,7 +562,13 @@ function validateEntry_(p, cfg) {
   const wanted = String(p.type || '').trim().toLowerCase();
   const type = KAKEIBO_TYPES.find(function (t) { return t.toLowerCase() === wanted; }) || cfg.types[category] || 'Extra';
   const remarks = String(p.remarks || '').trim().slice(0, 200);
-  return { fields: { amount: amount, dateStr: dateStr, time: time, category: category, payment: payment, type: type, remarks: remarks } };
+  // A deposit to a fund (the app's "Deposit to this fund" button): only for a fund's own category, and always type Savings.
+  let deposit = false, finalType = type;
+  if (String(p.fundAction || '').toLowerCase() === 'deposit') {
+    if (!cfg.funds.some(function (f) { return f.category === category; })) return { error: 'Invalid deposit' };
+    deposit = true; finalType = 'Savings';
+  }
+  return { fields: { amount: amount, dateStr: dateStr, time: time, category: category, payment: payment, type: finalType, remarks: remarks, deposit: deposit } };
 }
 
 /** Appends the row. Call inside withLock_. */
@@ -574,7 +582,7 @@ function addExpense_(f, cfg) {
       const start = Math.max(2, last - 99);
       const ids = sheet.getRange(start, ID_COL, last - start + 1, 1).getValues().flat();
       if (ids.indexOf(f.id) !== -1) {
-        return { ok: true, duplicate: true, message: 'Already saved', fixed: flags.fixed, saving: flags.saving,
+        return { ok: true, duplicate: true, message: 'Already saved', fixed: flags.fixed, saving: flags.saving, deposit: !!f.deposit,
                  fund: getFundInfo_(f.category, f.dateStr), budget: safeBudget_(f.dateStr) };
       }
     }
@@ -582,9 +590,9 @@ function addExpense_(f, cfg) {
   const tz = tz_();
   const date = Utilities.parseDate(f.dateStr, tz, 'yyyy-MM-dd');
   const month = Utilities.formatDate(date, tz, 'MMMM');
-  sheet.appendRow([date, month, f.time, f.category, f.amount, f.payment, f.remarks, f.device, f.person, f.id, f.type]);
+  sheet.appendRow([date, month, f.time, f.category, f.amount, f.payment, f.remarks, f.device, f.person, f.id, f.type, f.deposit ? 'Deposit' : '']);
   SpreadsheetApp.flush();
-  return { ok: true, message: 'Saved ' + f.amount + ' in ' + f.category, type: f.type, fixed: flags.fixed, saving: flags.saving,
+  return { ok: true, message: 'Saved ' + f.amount + ' in ' + f.category, type: f.type, fixed: flags.fixed, saving: flags.saving, deposit: !!f.deposit,
            fund: getFundInfo_(f.category, f.dateStr), budget: safeBudget_(f.dateStr) };
 }
 
@@ -593,14 +601,15 @@ function recentEntries_(auth) {
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EXPENSES);
   const last = sh.getLastRow();
   if (last < 2) return { ok: true, entries: [] };
-  const rows = sh.getRange(2, 1, last - 1, 11).getValues();
+  const rows = sh.getRange(2, 1, last - 1, 12).getValues();
   const out = [];
   for (let i = rows.length - 1; i >= 0 && out.length < RECENT_LIMIT; i--) {
     const r = rows[i];
     if (!r[9] || !(r[0] instanceof Date)) continue;                 // entries without an id cannot be edited
     if (norm_(r[8]) !== norm_(auth.person)) continue;               // you only see and change your own entries
     out.push({ id: String(r[9]), date: dayStr_(r[0]), time: timeStr_(r[2]), category: String(r[3]), amount: Number(r[4]),
-               payment: String(r[5]), remarks: String(r[6] || ''), type: String(r[10] || ''), device: String(r[7] || '') });
+               payment: String(r[5]), remarks: String(r[6] || ''), type: String(r[10] || ''), device: String(r[7] || ''),
+               deposit: String(r[7]) === 'Recurring' || String(r[11]) === 'Deposit' });
   }
   out.sort(function (a, b) { return (b.date + b.time).localeCompare(a.date + a.time); });
   return { ok: true, entries: out };
@@ -801,12 +810,12 @@ function fundStatement_(p) {
 
   const ex = ss.getSheetByName(EXPENSES), last = ex.getLastRow(), deposits = [], dispersals = [];
   if (last > 1) {
-    ex.getRange(2, 1, last - 1, 11).getValues().forEach(function (r) {
+    ex.getRange(2, 1, last - 1, 12).getValues().forEach(function (r) {
       if (!(r[0] instanceof Date) || String(r[3]) !== f.category) return;
       const date = dayStr_(r[0]);
       const e = { date: date, time: timeStr_(r[2]), amount: Number(r[4]) || 0, person: String(r[8] || ''), payment: String(r[5] || ''), remarks: String(r[6] || ''),
                   counted: !!ledgerStart && date.slice(0, 7) >= ledgerStart && date <= today };
-      (String(r[7]) === 'Recurring' ? deposits : dispersals).push(e);
+      (String(r[7]) === 'Recurring' || String(r[11]) === 'Deposit' ? deposits : dispersals).push(e);
     });
   }
   const newest = function (a, b) { return (b.date + b.time).localeCompare(a.date + a.time); };

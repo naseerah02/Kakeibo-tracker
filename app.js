@@ -16,6 +16,7 @@
   var pinRec = null;        // { salt, hash, len, fails, until }
   var bioRec = null, bioOk = false, bioBusy = false;   // fingerprint: saved credential, available on this phone, prompt open
   var favs = [], prefs = {}, lang = 'en';
+  var depositMode = null;   // { fund, category } while the form is recording a deposit to a fund
   var locked = true, hiddenAt = 0, forceActivate = false, forgot = false;
   var screen = '', lastScreen = '', tab = 'add', editing = null, formReady = false;
   var syncing = false, cfgMsg = '', histNote = '', installPrompt = null, resendTimer = null, fundNoteDay = '', fsFund = '';
@@ -300,10 +301,11 @@
     return cat;
   }
   function chooseFund(name) {
+    depositMode = null;
     var cat = cfg ? fundCategory(name) : '';
     if (!cat || cfg.categories.indexOf(cat) < 0) return false;
     if (editing) endEdit();
-    $('category').value = cat; syncType(); renderTabs(); $('amount').focus();
+    $('category').value = cat; syncType(); renderTabs(); renderEdit(); $('amount').focus();
     return true;
   }
   function tryFund() {
@@ -335,6 +337,7 @@
   function applyFav(f) {
     if (editing) endEdit();
     if (cfg.categories.indexOf(f.category) >= 0) $('category').value = f.category;
+    if (depositMode && $('category').value !== depositMode.category) { depositMode = null; renderEdit(); }
     syncType();
     if (cfg.payments.indexOf(f.payment) >= 0) $('payment').value = f.payment;
     $('remarks').value = f.remarks || '';
@@ -351,7 +354,7 @@
     $('qsum').textContent = t('q.waiting', { n: queue.length - failed }) + (failed ? t('q.failed', { f: failed }) : '');
     $('qlist').innerHTML = queue.map(function (e) {
       var p = e.payload, head = e.kind === 'reflection'
-        ? t('q.reflection', { kind: esc(t('kind.' + p.kind)) }) : '<b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.category);
+        ? t('q.reflection', { kind: esc(t('kind.' + p.kind)) }) : '<b>' + esc(money(p.amount)) + '</b> &middot; ' + esc(p.category) + (p.fundAction === 'deposit' ? ' &middot; ' + esc(t('dep.tag')) : '');
       var meta = e.kind === 'reflection' ? esc(p.date) : esc(p.date) + ' ' + esc(p.time) + (p.remarks ? ' &middot; ' + esc(p.remarks) : '');
       return '<div class="qrow"><div>' + head + '</div><div class="meta">' + meta + '</div>' +
         (e.failed ? '<div class="bad">' + esc(t('q.notSaved', { err: errText(e.error) })) + '</div><button class="small" data-act="retry" data-id="' + esc(e.id) + '">' + esc(t('q.retry')) + '</button>'
@@ -387,6 +390,7 @@
 
   function noteFor(res) {
     if (!res) return '';
+    if (res.fund && res.deposit) return t('note.deposit', { name: esc(res.fund.name), amt: (res.fund.balance < 0 ? '-' : '') + money(res.fund.balance) });
     if (res.fund) return t('note.fund', { name: esc(res.fund.name), state: res.fund.balance < 0 ? t('note.fund.over', { amt: money(res.fund.balance) }) : t('note.fund.ok', { amt: money(res.fund.balance) }) });
     if (res.saving) return t('note.saving');
     if (res.fixed) return t('note.fixed');
@@ -563,10 +567,24 @@
   // ---------- edit and delete ----------
   function renderEdit() {
     $('editBar').hidden = !editing;
-    $('save').textContent = editing ? t('save.changes') : t('save.record');
+    $('depositBar').hidden = !depositMode || !!editing;
+    $('save').textContent = editing ? t('save.changes') : depositMode ? t('save.deposit') : t('save.record');
     if (editing) $('editText').textContent = editing.src === 'q' ? t('edit.text.q') : t('edit.text');
+    if (depositMode && !editing) $('depositText').textContent = t('dep.bar', { fund: depositMode.fund });
+  }
+  // "Deposit to this fund": the next Save adds money to the fund (a deposit) instead of being a payment from it.
+  function startDeposit(name) {
+    if (!cfg) return;
+    switchTab('add');
+    if (!chooseFund(norm(name))) return;
+    var f = (cfg.funds || []).filter(function (x) { return x.name === name; })[0];
+    depositMode = { fund: name, category: $('category').value };
+    $('type').value = 'Savings';
+    renderPreview(); renderEdit(); say('', '');
+    $('amount').focus();
   }
   function startEdit(src, id) {
+    depositMode = null;
     var item = src === 'q' ? (queue.filter(function (e) { return e.id === id; })[0] || {}).payload
                            : recent.filter(function (e) { return e.id === id; })[0];
     if (!item) return;
@@ -639,8 +657,8 @@
     else if ($('histNote').className === 'warn') paint($('histNote'), '', '');
     var pend = queue.filter(function (e) { return e.kind !== 'reflection'; }), seen = {};
     pend.forEach(function (e) { seen[e.id] = 1; });
-    var rows = pend.map(function (e) { return rowHtml('q', e.id, e.payload, e.failed ? t('q.notSaved', { err: errText(e.error) }) : t('q.waitItem')); });
-    rows = rows.concat(recent.filter(function (x) { return !seen[x.id]; }).map(function (x) { return rowHtml('s', x.id, x, ''); }));
+    var rows = pend.map(function (e) { return rowHtml('q', e.id, e.payload, e.failed ? t('q.notSaved', { err: errText(e.error) }) : (e.payload.fundAction === 'deposit' ? t('dep.tag') + ' \u00b7 ' : '') + t('q.waitItem')); });
+    rows = rows.concat(recent.filter(function (x) { return !seen[x.id]; }).map(function (x) { return rowHtml('s', x.id, x, x.deposit ? t('dep.tag') : ''); }));
     $('histList').innerHTML = rows.length ? rows.join('') : t('hist.none');
   }
 
@@ -848,7 +866,8 @@
     h += entrySection(t('fs.deposits'), 'fs.nodep', 'fs.dep.total', d.deposits || [], d.depositCount || 0, d.depositTotal || 0);
     h += entrySection(t('fs.spending'), 'fs.nospend', 'fs.spend.total', d.dispersals || [], d.dispersalCount || 0, d.dispersalTotal || 0);
     if (d.earlierCount) h += '<p class="meta">' + esc(tn('fs.earlier', d.earlierCount, { month: monthText(f.ledgerStart) })) + '</p>';
-    h += '<button class="primary" type="button" data-fspay="' + esc(f.name) + '">' + esc(t('fs.paybtn')) + '</button>';
+    h += '<button class="primary dep" type="button" data-fsdep="' + esc(f.name) + '">' + esc(t('fs.depbtn')) + '</button>' +
+         '<button class="primary" type="button" data-fspay="' + esc(f.name) + '">' + esc(t('fs.paybtn')) + '</button>';
     if (stale) h += t('m.last');
     $('fsBody').innerHTML = h;
   }
@@ -878,7 +897,10 @@
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
     b.addEventListener('click', function () { switchTab(b.getAttribute('data-tab')); });
   });
-  $('category').addEventListener('change', syncType);
+  $('category').addEventListener('change', function () {
+    if (depositMode && $('category').value !== depositMode.category) { depositMode = null; renderEdit(); }   // choosing another category ends the deposit
+    syncType();
+  });
   $('type').addEventListener('change', renderPreview);
   $('amount').addEventListener('input', renderPreview);
   $('date').addEventListener('change', renderPreview);
@@ -886,7 +908,9 @@
   $('fsPick').addEventListener('change', function () { fsFund = $('fsPick').value; loadFunds(); });
   $('fsBody').addEventListener('click', function (ev) {
     var b = ev.target.closest('button[data-fspay]');
-    if (b) { switchTab('add'); chooseFund(norm(b.getAttribute('data-fspay'))); }
+    if (b) { switchTab('add'); chooseFund(norm(b.getAttribute('data-fspay'))); return; }
+    var dpb = ev.target.closest('button[data-fsdep]');
+    if (dpb) startDeposit(dpb.getAttribute('data-fsdep'));
   });
   $('monBody').addEventListener('click', function (ev) {
     var a = ev.target.closest('a[data-fs]');
@@ -910,17 +934,20 @@
     if (!cfg) { say(t('f.nocfg'), 'err'); return; }
     var f = collect(amount);
     if (editing) { await saveEdit(f); return; }
+    if (depositMode) { f.type = 'Savings'; f.fundAction = 'deposit'; }
     var id = newId();
     var entry = { id: id, savedAt: Date.now(), kind: 'expense',
                   payload: Object.assign({ id: id, device: (conn && conn.device) || 'Android', person: conn.person }, f) };
     await Core.qPut(entry); queue.push(entry);
     prefs = { category: f.category, payment: f.payment }; Core.kvSet('prefs', prefs);   // remembered for next time
     $('amount').value = ''; $('remarks').value = ''; setNow(); $('after').innerHTML = '';
+    depositMode = null;   // the next entry is a normal one again
     say(t('saved.local'), 'ok');
     renderAll(); registerBackgroundSync(); runSync();
   });
 
   $('editCancel').addEventListener('click', function () { endEdit(); say('', ''); });
+  $('depositCancel').addEventListener('click', function () { depositMode = null; renderEdit(); });
   $('editDelete').addEventListener('click', function () { if (editing) deleteEntry(editing.src, editing.id); });
 
   $('favs').addEventListener('click', function (ev) {

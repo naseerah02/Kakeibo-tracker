@@ -107,6 +107,7 @@
   .tbl th { color: var(--muted); font-weight: 600; }
   .bar .lab a.link { margin: 0; color: var(--accent); }
   .qrow.old { opacity: .55; }
+  .primary.dep { background: var(--ok); }
 </style>
 </head>
 <body>
@@ -175,6 +176,10 @@
       <p class="banner" id="banner" hidden></p>
       <div class="banner" id="limitNote" hidden></div>
       <div class="banner" id="fundNote" hidden><span id="fundNoteText"></span><button id="fundNoteX" class="small" type="button" style="margin-top:8px" data-i18n="fundnote.hide">Hide for today</button></div>
+      <div class="banner" id="depositBar" hidden>
+        <span id="depositText"></span><br>
+        <button id="depositCancel" class="small" type="button" style="margin-top:6px" data-i18n="edit.cancel">Cancel</button>
+      </div>
       <div class="banner" id="editBar" hidden>
         <span id="editText"></span><br>
         <button id="editCancel" class="small" type="button" style="margin-top:6px" data-i18n="edit.cancel">Cancel</button>
