@@ -108,6 +108,11 @@
   .bar .lab a.link { margin: 0; color: var(--accent); }
   .qrow.old { opacity: .55; }
   .primary.dep { background: var(--ok); }
+  .tbl.sc th, .tbl.sc td { font-size: 12px; padding: 4px 2px; }
+  .tbl.sc tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
+  .yes { color: var(--ok); font-weight: 700; } .no { color: var(--err); font-weight: 700; }
+  .fundcard { padding: 10px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .fchead { display: flex; justify-content: space-between; align-items: baseline; font-size: 16px; }
 </style>
 </head>
 <body>
@@ -167,7 +172,7 @@
     <nav class="tabs">
       <button class="tab on" type="button" data-tab="add" data-i18n="tab.add">Add</button>
       <button class="tab" type="button" data-tab="history" data-i18n="tab.history">History</button>
-      <button class="tab" type="button" data-tab="month" data-i18n="tab.month">Month</button>
+      <button class="tab" type="button" data-tab="month" data-i18n="tab.month">Reports</button>
       <button class="tab" type="button" data-tab="funds" data-i18n="tab.funds">Funds</button>
       <button class="tab" type="button" data-tab="reflect" data-i18n="tab.reflect">Reflect</button>
     </nav>
@@ -226,8 +231,8 @@
     </div>
 
     <div id="tabMonth" hidden>
-      <label for="monPeriod" data-i18n="mon.label">Month</label>
-      <select id="monPeriod"><option value="0" data-i18n="mon.0">This month</option><option value="1" data-i18n="mon.1">Last month</option><option value="2" data-i18n="mon.2">2 months ago</option></select>
+      <label for="monPeriod" data-i18n="mon.label">Report</label>
+      <select id="monPeriod"><option value="0" data-i18n="mon.0">This month</option><option value="1" data-i18n="mon.1">Last month</option><option value="2" data-i18n="mon.2">2 months ago</option><option value="3" data-i18n="mon.3">This year</option><option value="4" data-i18n="mon.4">Last year</option></select>
       <div id="monBody" style="margin-top:12px"><p class="hint">Loading your numbers...</p></div>
     </div>
 

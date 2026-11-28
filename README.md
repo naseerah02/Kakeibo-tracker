@@ -1,4 +1,4 @@
-# Kakeibo Family Expense Tracker (Android, v2.7)
+# Kakeibo Family Expense Tracker (Android, v2.8)
 
 A private family expense tracker built on a Google Sheet and an installable Android app. Log an expense in a few taps, even with no internet. Each phone signs in with an emailed code and a PIN, and everything lands in one shared sheet with a dashboard based on the Japanese **Kakeibo** budgeting method.
 
@@ -42,11 +42,12 @@ A private family expense tracker built on a Google Sheet and an installable Andr
 | **Entry** | Amount, category, Kakeibo type, payment mode, date, time, remarks. The app remembers your last category and payment mode, and you can save **favourites** (for example "Tea, 50") as one-tap chips. |
 | **History** | See your latest entries and **edit or delete** them from the app. |
 | **Budget warnings** | The budget banner turns amber when you have used 80% of the week's or month's allowance (you choose the level) and red when you are over. Under the amount, a preview shows what the purchase would do before you save it. |
-| **Category limits** | An optional monthly limit for any category (for example Food & Dining). You get a note when one is nearly used up, a preview before you save, and the Month tab, the Dashboard and the emails show it. |
+| **Category limits** | An optional monthly limit for any category (for example Food & Dining). You get a note when one is nearly used up, a preview before you save, and the Reports tab, the Dashboard and the emails show it. |
 | **Urdu** | The whole app can be switched to Urdu (اردو), right to left, with one tap. |
 | **Fund statement** | A **Funds** tab with a statement for each fund: balance, collected so far, spent, progress to the target, a month-by-month table, and two separate lists: **deposits** and **spending / dispersals**, each with its own count and total. Buttons to **deposit to** or **pay from** the fund. |
-| **Month** | A month summary inside the app: key figures, Kakeibo split, categories, weeks, days and fund balances. |
-| **Shortcuts** | Long-press the app icon for Add expense, Pay Zakat, History and Month summary. |
+| **Reports** | The **Reports** tab (called Month before version 2.8): a month summary, and a **year report with a monthly scorecard** (income, spent, left and savings goal for every month in one table). |
+| **Funds overview** | The Funds tab opens on **All funds**: every fund's balance, progress to its target and what to set aside, on one screen. |
+| **Shortcuts** | Long-press the app icon for Add expense, Pay Zakat, History and Month summary (opens the Reports tab). |
 | **Offline** | Entries are queued on the phone and sent later, also in the background when Android allows. |
 | **Sign-in and lock** | Email code (OTP) once per phone, then a **PIN or your fingerprint** each time the app opens. Phones can be revoked. |
 | **Kakeibo** | Needs, Wants, Culture, Extra and Savings. A monthly household **Plan** gives a weekly allowance and a budget banner. |
@@ -210,7 +211,7 @@ The repository holds only code. It has no keys and no data.
 1. Paste the new `Code.gs`, save, and run **setup** (safe to re-run). It adds the warning level to `Settings!B4`.
 2. **Deploy > Manage deployments > pencil > New version > Deploy.**
 3. Upload the changed app files to GitHub, replacing the old ones: `index.html`, `app.js`, `core.js`, `sw.js` and `manifest.webmanifest`.
-4. Open the app online on each phone. The warnings and the Month tab appear after the app updates. The new shortcuts follow when Android refreshes the installed app, or after you reinstall it.
+4. Open the app online on each phone. The warnings and the Reports tab appear after the app updates. The new shortcuts follow when Android refreshes the installed app, or after you reinstall it.
 
 ### From version 2.1 to 2.2
 
@@ -257,11 +258,17 @@ The repository holds only code. It has no keys and no data.
 3. Upload `index.html`, `app.js`, `i18n.js` and `sw.js` to GitHub, replacing the old ones.
 4. Open the app online on each phone. The Funds tab now has a green **Deposit to this fund** button.
 
+### From version 2.7 to 2.8
+
+1. Paste the new `Code.gs`, save, and **deploy a new version** (Deploy > Manage deployments > pencil > New version > Deploy). No `setup()` is needed: there are no sheet changes.
+2. Upload `index.html`, `app.js`, `i18n.js` and `sw.js` to GitHub, replacing the old ones.
+3. Open the app online on each phone. The Month tab is now called **Reports**, and the Funds tab opens on **All funds**.
+
 ---
 
 ## Daily use
 
-The app has five tabs: **Add**, **History**, **Month**, **Funds** and **Reflect**.
+The app has five tabs: **Add**, **History**, **Reports**, **Funds** and **Reflect**.
 
 ### Add
 
@@ -313,15 +320,15 @@ A **limit** caps what you want to spend in one category in a month, for example 
 - **A line under the amount** when you choose a category that has a limit: "Food & Dining 🍔: PKR 7,000 left of its PKR 10,000 limit", in amber or red if saving would reach or pass it. It sits next to the week and month preview.
 - **After you save**, the warning for that category is repeated under the button.
 - **Entries still waiting to sync** are counted too, so the figures are right offline.
-- **Month tab:** a *Category limits* section with a bar for each limit and the figures as spent / limit.
+- **Reports tab:** a *Category limits* section with a bar for each limit and the figures as spent / limit.
 
 **Elsewhere.** The Dashboard's category table has a **Limit** column, and the spent figure turns red when it is over. The weekly and monthly emails list any category at or over the warning level.
 
 A limit does not stop you saving. It is a nudge, like the budget warnings.
 
-### Month
+### Reports: month and year
 
-The **Month** tab is a summary of the whole month without opening the sheet. Choose **This month**, **Last month** or **2 months ago**:
+The **Reports** tab shows summaries without opening the sheet. Choose the report at the top: **This month**, **Last month**, **2 months ago**, **This year** or **Last year**. The three month reports show:
 
 - **Key figures:** spent, allowance and what is left (or by how much you are over), a meter showing the percentage of the allowance used, the average per day, and how this month compares with the one before.
 - **Kakeibo split:** Needs, Wants, Culture and Extra as a bar, with amounts and percentages.
@@ -334,9 +341,42 @@ The **Month** tab is a summary of the whole month without opening the sheet. Cho
 
 The numbers are kept on the phone, so a month you have already opened still shows offline, marked "Last loaded numbers".
 
+#### The year report and the monthly scorecard
+
+**This year** and **Last year** show one calendar year. Everything is worked out the same way as the monthly figures: *spent* means flexible spending, with fixed-cost categories (such as rent) and Savings entries kept apart.
+
+| What you see | Meaning |
+|---|---|
+| **Income**, **Spent**, **Left after spending** | Totals for the year. *Left* = income - spent - fixed costs paid. Income and left use the months that have a Plan with income. |
+| **Savings rate** | Left after spending as a percentage of income. |
+| **Savings goal met** | In how many months the amount left reached that month's savings goal, for example "5 of 6 months". |
+| **Over the allowance** | How many months spending went past the allowance (free to spend) for that month. |
+| **Average a month**, and the comparison with the year before | The average monthly spending, and "up 12% on 2025" when last year has data. |
+| **Scorecard: month by month** | One row per month with **Income**, **Spent**, **Left** and **Goal**, and a **Total** row. Figures are shortened (58.5k means 58,500). A tick means the goal was met, a cross that it was missed. A red *Spent* means that month went over its allowance, and a red *Left* that you spent more than you earned. |
+| **Highest and lowest spending month**, **Biggest single expense** | Quick highlights, with the amount, category, date, remarks and who paid. |
+| **Kakeibo split** and **Where the money went** | Needs, Wants, Culture and Extra for the year, and the top categories with their share of the year. |
+| **By person** and **By payment mode** | Who spent what, and how it was paid. |
+| **Funds this year** | For each fund that moved during the year: the balance at the start, collected, spent and the balance now. |
+
+Things to know about the year report:
+
+- **Months still to come are not listed**, so the current year shows January up to this month.
+- A month with **no Plan** (or no income on it) shows "-" for income and left, and "–" for the goal, but its spending is still counted.
+- Entries of type **Savings** (investments and fund payments) are shown separately and are not counted as spending.
+- A year you opened once is kept on the phone and shows offline, marked "Last loaded numbers".
+
+### Funds overview
+
+The **Funds** tab opens on **All funds**: every fund on one screen, so you can see at a glance which are on track.
+
+- At the top: the **total balance** of all funds, how much is **still to reach** across the funds that have a target, and how many funds are **behind**.
+- Then a card for each fund: its balance, a progress bar with its status (Target reached, On track, Behind, Date passed), the days to go and what to set aside each month against your plan, what has been collected and spent so far, and this month's collection and spending. A fund without a target says "No target set".
+- **Tap a card** to open that fund's statement. Choose **All funds** in the box at the top to come back.
+- Like the other screens, it is kept on the phone and shows offline, marked "Last loaded numbers".
+
 ### Funds: a statement for each fund
 
-The **Funds** tab shows one fund at a time. Choose the fund at the top (Zakat, Qurbani, or any you added). You can also tap a fund's name in the Funds section of the Month tab.
+Choose a fund at the top of the Funds tab to see its statement (Zakat, Qurbani, or any you added). You can also tap a fund's name in the Funds section of the Reports tab, or its card on the overview.
 
 | What you see | Meaning |
 |---|---|
@@ -367,7 +407,7 @@ After installing, touch and hold the app icon on the home screen to see up to fo
 | **Add expense** | The Add tab |
 | **Pay Zakat** | The Add tab with the Zakat category already chosen |
 | **History** | Your latest entries |
-| **Month summary** | The Month tab |
+| **Month summary** | The Reports tab (month reports and the year report) |
 
 The app still asks for the PIN first, then goes straight to the screen you picked. Android shows at most four shortcuts. The Reflect tab opens from the link in the weekly summary email, and a link ending in `#fund-` and a fund's name (for example `#fund-hajj` or `#fund-emergency-fund`) opens the form with that fund chosen, so you can add your own link or home-screen bookmark for any fund. A link ending in `#funds` opens the Funds tab. `#qurbani` works the same way. A shortcut can take up to a day to appear after an update, because Android refreshes an installed app's shortcuts on its own schedule. Reinstalling the app makes it immediate.
 
@@ -530,7 +570,7 @@ The sheet and the app hold **up to 8 funds**. Every fund works like Zakat and Qu
 3. A message tells you what was created and what to do next. The script adds a category such as `Hajj 🕋` (type Savings) to the category list, adds the fund to the funds list in `Settings`, and refreshes the Plan headings, the `Funds` tab and the Dashboard.
 4. On the `Plan` tab, enter the monthly set-aside in the fund's column. The message names the column; it is the next free one after the existing funds (Zakat is H, Qurbani is I, the third fund is J, and so on). The column heading shows the fund's name.
 5. Optional: a **target amount and date** in `Settings` (columns N and O of the fund's row), and an **opening balance** in row 2 of the `Funds` tab if you already hold money for it.
-6. Open the app while online. The new fund appears as a button under "Pay from a fund", in the Month tab, and in reminders.
+6. Open the app while online. The new fund appears as a button under "Pay from a fund", in the Reports tab, and in reminders.
 
 **By hand, if you prefer.** Do the same three things yourself: add a category to the list in `Settings` (columns D to F) with type **Savings** and fixed cost **No**; type the fund's name in `Settings` column L and its category in column M, in the next empty row of the funds list; then run `setup()` once so the `Funds` tab and headings follow.
 
@@ -559,11 +599,11 @@ Every entry in a fund's category is one of two kinds, decided by **where it came
 
 | Number | Where |
 |---|---|
-| **Target** (amount, date) | You set it in `Settings` columns N and O. Shown on the Funds tab, the Month tab, the Dashboard and in the reminder emails. |
+| **Target** (amount, date) | You set it in `Settings` columns N and O. Shown on the Funds tab, the Reports tab, the Dashboard and in the reminder emails. |
 | **Collected** | The Funds tab in the app. In the sheet: the `Funds` tab ("collected", per month) and the Dashboard ("Collected to date"). |
 | **Deposits** | The Funds tab lists them with a count and total. In the sheet: the `Funds` tab ("deposits") and the `Expenses` tab (Device Name `Recurring`). |
 | **Spent / dispersed** | The Funds tab lists them with a count and total. In the sheet: the `Funds` tab ("spent") and the Dashboard ("Spent to date", "Spent this month"). |
-| **Remaining** (balance) | The Funds tab, the Month tab, the note after each payment, the `Funds` tab and the Dashboard. |
+| **Remaining** (balance) | The Funds tab, the Reports tab, the note after each payment, the `Funds` tab and the Dashboard. |
 | **Remaining to target** | The Funds tab ("Still to reach" and the progress bar), the Dashboard ("Needed / month") and the emails. |
 
 **Worked example.** A Zakat fund with an opening balance of 6,000, a monthly bank collection of 4,000 on the Recurring tab, and a target of 30,000. By the end of December three deposits have been made: collected 18,000, spent 0, **balance 18,000** (60% of the target). In January the collection adds 4,000 and you pay 10,000 from the fund. Collected is now 22,000 (4 deposits), spent 10,000 (1 payment) and the **balance 12,000**.
@@ -601,7 +641,7 @@ The target is compared with the fund's **balance**. If you pay part of it early 
 **Where you see it.**
 
 - **Add tab:** a banner appears only when a fund needs attention: behind and within 90 days (amber, red from 30 days), on track but within the last week ("have it ready"), or the date has just passed (red). **Hide for today** hides it until tomorrow.
-- **Month tab (This month):** every fund with a target shows a progress bar, the amounts, the days to go and the monthly amount needed.
+- **Reports tab (This month):** every fund with a target shows a progress bar, the amounts, the days to go and the monthly amount needed.
 - **Weekly and monthly emails:** a "Fund targets" section.
 - **Reminder emails:** once a day (about 7am) the script checks each fund and emails the summary address at **90, 30 and 7 days** before the target date, and **on the day**. Behind funds get all four. A fund that is on track is only mentioned at 7 days and on the day. Nothing is sent once the target is reached, and nothing is repeated: the last reminder sent is noted in column P. If you change the target date, reminders start again for the new date.
 - **Dashboard:** the Earmarked funds block gains Target, Target date and Needed / month columns.
@@ -718,7 +758,7 @@ The app can be shown in **Urdu (اردو)**, laid out right to left, or in Engli
 | **"Connect to the internet to change saved entries"** | Editing or deleting an entry already in the sheet needs a connection. |
 | **"Not your entry"** | You can only change your own entries. |
 | No amber or red warning | The `Plan` tab needs income for the month, since the allowance comes from it. The warning level is `Settings!B4`. |
-| The Month tab says "Connect to the internet" | That month has not been opened online yet. Open it once with internet and it is kept. |
+| The Reports tab says "Connect to the internet" | That month has not been opened online yet. Open it once with internet and it is kept. |
 | The long-press shortcuts are missing or old | Android refreshes them on its own schedule (up to a day). Reinstalling the app updates them at once. Only four are shown. |
 | No fund reminder emails | Both a target amount and a target date are needed, the fund must not be reached or long past, an address must be in `Settings!B2`, and `installTriggers` must have been run. An on-track fund is only emailed in its last week. |
 | A fund shows "behind" although I have paid part of it | The target is compared with the balance. Lower the target by what you paid, or set a new one. |
@@ -742,6 +782,11 @@ The app can be shown in **Urdu (اردو)**, laid out right to left, or in Engli
 | The Funds tab is empty or shows an error after updating | Run `setup()` once so the `Funds` tab gets the deposits columns, then reopen the tab. |
 | "Not saved: Invalid deposit" | A deposit can only go to a fund's own category. Open it from the fund's **Deposit to this fund** button, which chooses the right category. Delete the entry from the waiting list and enter it again. |
 | A deposit shows as spending | Check the entry in `Expenses`: its **Fund Action** (column L) must say `Deposit`, or its Device Name must be `Recurring`. After an upgrade, run `setup()` so the `Funds` tab counts the new column. |
+| The year report shows "-" for income and left in some months | Those months have no Plan with income. Add a row for the month on the `Plan` tab (a month without a row uses the row above it). Spending is still counted. |
+| The year report is empty | There are no entries for that year, or the app has not been online since the year changed. Open the Reports tab online once. |
+| The scorecard shows a red *Spent* | That month's spending went past its allowance (free to spend) on the Plan. |
+| The tab still says "Month" | The app files were not updated. Upload all four changed files, then open the app online and reopen it once. |
+| The Funds tab opens on "All funds" and I want one fund | Pick the fund in the box at the top, or tap its card. |
 | An entry is missing from History | Only your own entries with an ID appear, and only the latest 40. |
 | No budget banner | The `Plan` tab has no income for the current month. |
 | Recurring expense was not added | `Active` must be `Yes`, the start month must have begun, and `installTriggers` must have been run. Check the day of month. |
@@ -797,7 +842,9 @@ For developers. Everything except the health check is a `POST` to the `/exec` ad
 | `recent` | yes | none | `{"ok":true,"entries":[...]}` (own entries) |
 | `update` | yes | `id` plus the `save` fields | `{"ok":true,"budget":{...}}` |
 | `delete` | yes | `id` | `{"ok":true,"budget":{...}}` |
+| `funds_overview` | yes | none | `{"ok":true,"funds":[...],"totals":{...}}`: for every fund its balance, collected and spent to date, this month's collection and spending, and its target status. `totals` has the combined balance, targets, amount still to reach and the number behind |
 | `fund_statement` | yes | `fund` (the fund's name) | `{"ok":true,"v":2,"fund":{...},"months":[...],"deposits":[...],"dispersals":[...],...}`. `fund` has the opening balance, `collectedToDate`, `spentToDate`, balance and the target details. `months` lists the ledger months up to today (collected, spent, deposits, balance). `deposits` are entries whose Device Name is `Recurring`; `dispersals` are all others in the fund's category. Each list holds up to 100 entries from any person, newest first, with a `counted` flag, plus `depositCount`, `depositTotal`, `dispersalCount`, `dispersalTotal` and `earlierCount` |
+| `year_report` | yes | `year` (default: this year) | `{"ok":true,"year":...,"months":[...],"totals":{...},"byType":{...},"categories":[...],"people":[...],"payments":[...],"biggest":{...},"funds":[...],"prev":{...}}`. `months` is the scorecard: for each month up to today its income, goal, allowance, spent, fixed costs, savings, left, variance, whether the goal was met and the savings rate |
 | `summary` | yes | `period` (`week` or `month`), `date`, optional `detail: true` | `{"ok":true,"stats":{...},"prev":{...}}`. With `detail`, `stats` also has `byCategory`, `daily` and (for months) `weeks`, and the reply includes fund balances in `funds` the fund targets in `targets`, and the category limits in `limits`. |
 | `reflect` | yes | `kind` (`Weekly`/`Monthly`), `date`, `q1`, `q2`, `q3`, `id` | `{"ok":true}` |
 
@@ -825,12 +872,14 @@ After installing, check each of these once:
 - [ ] The budget banner shows figures (after filling in the `Plan`)
 - [ ] A favourite saves and fills the form when tapped
 - [ ] Budget warnings: with the week close to its allowance the banner turns amber, and a large amount shows an amber or red line under the amount field
-- [ ] The Month tab shows figures, the Kakeibo split and charts, and still shows a month you opened before when you go offline
+- [ ] The Reports tab shows figures, the Kakeibo split and charts, and still shows a month you opened before when you go offline
+- [ ] Reports > **This year**: the scorecard has a row for each month so far and the totals match the Dashboard for those months (type each month's 1st into `Dashboard!B3` to compare)
+- [ ] The Funds tab opens on **All funds**, shows every fund with its balance and progress, and tapping a card opens that fund's statement
 - [ ] Touch and hold the app icon: the Pay Zakat shortcut opens the form with the Zakat category chosen
 - [ ] Set a limit on Food & Dining in `Settings` column G. Typing an amount over it in that category shows a red line under the amount, and a note appears on the Add tab once the limit is nearly used
 - [ ] Unlock the app, tap **Turn on fingerprint**, close the app and reopen it: Android asks for your fingerprint and the app opens. Cancel it once: the PIN still works
 - [ ] Tap **اردو**: every screen turns right to left in Urdu. Tap **English** and it returns. Close and reopen: the choice is kept
-- [ ] Set a Qurbani target and date in `Settings`: the Month tab shows its progress and the monthly amount needed
+- [ ] Set a Qurbani target and date in `Settings`: the Reports tab shows its progress and the monthly amount needed
 - [ ] On the Funds tab tap **Deposit to this fund**, enter an amount and save: the banner, then "Deposited to your … fund: balance now …". The entry appears under **Deposits** and the balance goes up by that amount
 - [ ] Open the **Funds** tab: the balance and collected match the `Funds` tab in the sheet. The monthly bank collection is listed under **Deposits**, and a payment you make with **Pay from this fund** appears under **Spending / dispersals** with the balance dropping by that amount
 - [ ] Set the target date about 20 days away with a low balance: the Add tab shows a red fund banner, and running `checkFundReminders` sends an email once (and not a second time)

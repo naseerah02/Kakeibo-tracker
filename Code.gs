@@ -38,6 +38,7 @@ const ID_COL = 10;
 const KAKEIBO_TYPES = ['Needs', 'Wants', 'Culture', 'Extra', 'Savings'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+const VERSION = '2.9';        // shown by the ping and the app's connection check; the app asks for at least this
 const MAX_FUNDS = 8;          // funds the sheet and app can hold (rows 2-9 of Settings L:P)
 const OTP_TTL = 600;          // a code is valid for 10 minutes
 const OTP_MAX_TRIES = 5;      // wrong guesses before the code is cancelled
@@ -247,6 +248,9 @@ function onOpen() {
     .addSeparator()
     .addItem('Install the scheduled emails and reminders', 'installTriggers')
     .addItem('Send a test email', 'sendTestEmail')
+    .addSeparator()
+    .addItem('Back up now', 'backupNow')
+    .addItem('Open the backup folder', 'openBackupFolder')
     .addToUi();
 }
 
@@ -364,7 +368,7 @@ function ensureAuxSheets_(ss) {
 
 /** GET ?ping=1 is a health check. Everything else is a POST (see route_). */
 function doGet() {
-  return json_({ ok: true, message: 'Expense tracker is running' });
+  return json_({ ok: true, message: 'Expense tracker is running', version: VERSION });
 }
 
 /** POST: JSON body (sent as text/plain). Field "action" picks what to do; "token" proves which phone it is. */
@@ -391,6 +395,9 @@ function route_(p) {
     case 'delete': return deleteEntry_(p, auth);
     case 'summary': return summaryFor_(p);
     case 'fund_statement': return fundStatement_(p);
+    case 'funds_overview': return fundsOverview_();
+    case 'health': return healthCheck_();
+    case 'year_report': return yearReport_(p);
     case 'reflect': return saveReflection_(p, auth);
     default: return { ok: false, error: 'Unknown action' };
   }
@@ -734,7 +741,7 @@ function readExpenses_() {
   if (last < 2) return [];
   return ex.getRange(2, 1, last - 1, 11).getValues()
     .filter(function (r) { return r[0] instanceof Date; })
-    .map(function (r) { return { ds: dayStr_(r[0]), cat: String(r[3]), amt: Number(r[4]) || 0, type: String(r[10] || ''), person: String(r[8] || '') }; });
+    .map(function (r) { return { ds: dayStr_(r[0]), cat: String(r[3]), amt: Number(r[4]) || 0, type: String(r[10] || ''), person: String(r[8] || ''), pay: String(r[5] || ''), rem: String(r[6] || '') }; });
 }
 
 /** The Funds ledger row (month) at or before dateStr, or null. */
@@ -770,6 +777,155 @@ function fundBalances_(dateStr) {
     const hit = fundRow_(dateStr);
     return cfg.funds.map(function (f) { return { name: f.name, balance: hit ? Math.round(Number(hit[17 + f.slot]) || 0) : 0 }; });
   } catch (err) { return []; }
+}
+
+// ======================================================================
+// Funds overview, and the year report with its monthly scorecard
+// ======================================================================
+
+/** The Funds ledger read once: the opening balances (row 2) and the month rows. Null if the tab is missing. */
+function readLedger_() {
+  const fu = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FUNDS);
+  if (!fu) return null;
+  const opening = fu.getRange(2, 2, 1, MAX_FUNDS).getValues()[0].map(function (v) { return Math.round(Number(v) || 0); });
+  const rows = [];
+  fu.getRange('A4:Y39').getValues().forEach(function (r) { if (r[0] instanceof Date) rows.push({ day: dayStr_(r[0]), r: r }); });
+  return { opening: opening, rows: rows };
+}
+
+/** Every fund on one screen: balance, what was collected and spent, and progress towards its target. */
+function fundsOverview_() {
+  const cfg = getConfig_(), today = today_(), led = readLedger_(), ym = today.slice(0, 7);
+  const targets = fundTargets_(today);
+  const funds = cfg.funds.map(function (f, i) {
+    let collected = led ? led.opening[f.slot] : 0, spent = 0, tmC = 0, tmS = 0, balance = collected;
+    if (led) {
+      led.rows.forEach(function (x) {
+        if (x.day > today) return;
+        const c = Math.round(Number(x.r[1 + f.slot]) || 0), s2 = Math.round(Number(x.r[9 + f.slot]) || 0);
+        collected += c; spent += s2; balance = Math.round(Number(x.r[17 + f.slot]) || 0);
+        if (x.day.slice(0, 7) === ym) { tmC = c; tmS = s2; }
+      });
+    }
+    const t = targets[i] || {};
+    return { name: f.name, category: f.category, balance: balance, collectedToDate: collected, spentToDate: spent,
+             thisMonthCollected: tmC, thisMonthSpent: tmS,
+             target: t.target || 0, targetDate: t.targetDate || '', status: t.status || 'none', progress: t.progress || 0,
+             remaining: t.remaining || 0, needed: t.needed || 0, planned: t.planned || 0, daysLeft: t.daysLeft };
+  });
+  const withTarget = funds.filter(function (f) { return f.target > 0; });
+  return { ok: true, v: 1, funds: funds, totals: {
+    count: funds.length,
+    balance: funds.reduce(function (s2, f) { return s2 + f.balance; }, 0),
+    target: withTarget.reduce(function (s2, f) { return s2 + f.target; }, 0),
+    remaining: withTarget.reduce(function (s2, f) { return s2 + f.remaining; }, 0),
+    behind: funds.filter(function (f) { return f.status === 'behind' || f.status === 'overdue'; }).length
+  } };
+}
+
+/**
+ * One calendar year of spending, month by month (the scorecard) and in total. Spending here means flexible spending:
+ * fixed-cost categories and Savings-type entries are counted separately, as everywhere else.
+ *   left   = income - spent - fixed costs paid        (only for months that have a Plan with income)
+ *   goal met = left is at least the savings goal      (only for months with a savings goal)
+ * Months still to come are not listed.
+ */
+function yearAgg_(rows, cfg, year, lastMonth) {
+  const ys = String(year), list = [], byMonth = {};
+  for (let m = 1; m <= lastMonth; m++) {
+    const o = { month: ys + '-' + ('0' + m).slice(-2), spent: 0, fixedPaid: 0, savingsPaid: 0, count: 0 };
+    byMonth[o.month] = o; list.push(o);
+  }
+  const byType = { Needs: 0, Wants: 0, Culture: 0, Extra: 0 }, cats = {}, people = {}, pays = {};
+  let biggest = null;
+  rows.forEach(function (r) {
+    if (r.ds.slice(0, 4) !== ys) return;
+    const o = byMonth[r.ds.slice(0, 7)];
+    if (!o) return;
+    if (r.type === 'Savings') { o.savingsPaid += r.amt; return; }
+    if (cfg.fixed.indexOf(r.cat) !== -1) { o.fixedPaid += r.amt; return; }
+    o.spent += r.amt; o.count++;
+    byType[byType.hasOwnProperty(r.type) ? r.type : 'Extra'] += r.amt;
+    cats[r.cat] = (cats[r.cat] || 0) + r.amt;
+    const who = r.person || 'Unknown', how = r.pay || 'Other';
+    people[who] = (people[who] || 0) + r.amt;
+    pays[how] = (pays[how] || 0) + r.amt;
+    if (!biggest || r.amt > biggest.amount) biggest = { amount: Math.round(r.amt), date: r.ds, category: r.cat, remarks: r.rem, person: r.person };
+  });
+  return { list: list, byType: byType, cats: cats, people: people, pays: pays, biggest: biggest };
+}
+
+function yearReport_(p) {
+  const today = today_(), thisYear = +today.slice(0, 4);
+  let year = parseInt(p.year, 10);
+  if (!(year >= 2000 && year <= 2100)) year = thisYear;
+  const cfg = getConfig_(), rows = readExpenses_();
+  const lastMonth = year < thisYear ? 12 : year === thisYear ? +today.slice(5, 7) : 0;
+  const agg = yearAgg_(rows, cfg, year, lastMonth);
+  const rnd = function (n) { return Math.round(n); };
+
+  const months = agg.list.map(function (o) {
+    const plan = planFor_(o.month + '-01');
+    const out = { month: o.month, hasPlan: !!plan, income: plan ? plan.income : null, goal: plan ? plan.savings : null,
+                  allowance: plan ? rnd(plan.free) : null, spent: rnd(o.spent), fixedPaid: rnd(o.fixedPaid), savingsPaid: rnd(o.savingsPaid), count: o.count,
+                  left: null, variance: null, goalMet: null, savingsRate: null };
+    if (plan) {
+      out.left = rnd(plan.income - o.spent - o.fixedPaid);
+      out.variance = rnd(plan.free - o.spent);
+      if (plan.savings > 0) out.goalMet = out.left >= plan.savings;
+      out.savingsRate = rnd(out.left / plan.income * 100);
+    }
+    return out;
+  });
+
+  const withPlan = months.filter(function (m) { return m.hasPlan; });
+  const sum = function (list, key) { return list.reduce(function (s2, m) { return s2 + (m[key] || 0); }, 0); };
+  const active = months.filter(function (m) { return m.count > 0; });
+  const goalMonths = months.filter(function (m) { return m.goalMet !== null; });
+  const incomeTotal = sum(withPlan, 'income'), leftTotal = sum(withPlan, 'left'), spentTotal = sum(months, 'spent');
+  const high = active.slice().sort(function (a, b) { return b.spent - a.spent; })[0] || null;
+  const low = active.slice().sort(function (a, b) { return a.spent - b.spent; })[0] || null;
+  const totals = {
+    income: incomeTotal, spent: spentTotal, fixedPaid: sum(months, 'fixedPaid'), savingsPaid: sum(months, 'savingsPaid'),
+    left: leftTotal, goal: sum(withPlan, 'goal'), savingsRate: incomeTotal > 0 ? rnd(leftTotal / incomeTotal * 100) : null,
+    monthsCounted: months.length, goalMonths: goalMonths.length, goalMet: goalMonths.filter(function (m) { return m.goalMet; }).length,
+    overAllowance: withPlan.filter(function (m) { return m.variance < 0; }).length,
+    avgSpent: months.length ? rnd(spentTotal / months.length) : 0,
+    highest: high ? { month: high.month, spent: high.spent } : null, lowest: low ? { month: low.month, spent: low.spent } : null
+  };
+
+  const catList = Object.keys(agg.cats).map(function (c) { return { category: c, amount: rnd(agg.cats[c]) }; })
+    .sort(function (a, b) { return b.amount - a.amount; }).slice(0, 10)
+    .map(function (c) { return { category: c.category, amount: c.amount, pct: spentTotal > 0 ? rnd(c.amount / spentTotal * 100) : 0, avg: months.length ? rnd(c.amount / months.length) : 0 }; });
+  const rank = function (o, key) { return Object.keys(o).map(function (k) { const x = { amount: rnd(o[k]) }; x[key] = k; return x; }).sort(function (a, b) { return b.amount - a.amount; }); };
+
+  // what each fund did during the year, from the Funds ledger
+  const led = readLedger_(), funds = [];
+  if (led) {
+    cfg.funds.forEach(function (f) {
+      let prev = led.opening[f.slot], start = null, collected = 0, spent = 0, end = null, any = false;
+      led.rows.forEach(function (x) {
+        if (x.day > today) return;
+        const y = +x.day.slice(0, 4), bal = Math.round(Number(x.r[17 + f.slot]) || 0);
+        if (y < year) { prev = bal; return; }
+        if (y > year) return;
+        if (!any) { start = prev; any = true; }
+        collected += Math.round(Number(x.r[1 + f.slot]) || 0); spent += Math.round(Number(x.r[9 + f.slot]) || 0); end = bal;
+      });
+      if (any) funds.push({ name: f.name, startBalance: start, collected: collected, spent: spent, endBalance: end });
+    });
+  }
+
+  // the year before, for a comparison
+  let prev = null;
+  if (year > 2000) {
+    const pa = yearAgg_(rows, cfg, year - 1, 12), ps = pa.list.reduce(function (s2, o) { return s2 + o.spent; }, 0);
+    if (ps > 0) prev = { year: year - 1, spent: rnd(ps) };
+  }
+
+  return { ok: true, v: 1, year: year, months: months, totals: totals,
+           byType: { Needs: rnd(agg.byType.Needs), Wants: rnd(agg.byType.Wants), Culture: rnd(agg.byType.Culture), Extra: rnd(agg.byType.Extra) },
+           categories: catList, people: rank(agg.people, 'person'), payments: rank(agg.pays, 'mode'), biggest: agg.biggest, funds: funds, prev: prev };
 }
 
 // ======================================================================
@@ -1164,7 +1320,7 @@ function runRecurring() {
 
 /** Run once. Creates the daily recurring check, the weekly email (Sunday evening) and the monthly email (1st). */
 function installTriggers() {
-  const mine = ['runRecurring', 'sendWeeklySummary', 'sendMonthlySummary', 'checkFundReminders'];
+  const mine = ['runRecurring', 'sendWeeklySummary', 'sendMonthlySummary', 'checkFundReminders', 'runBackup'];
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (mine.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
   });
@@ -1172,7 +1328,87 @@ function installTriggers() {
   ScriptApp.newTrigger('checkFundReminders').timeBased().everyDays(1).atHour(7).create();
   ScriptApp.newTrigger('sendWeeklySummary').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(20).create();
   ScriptApp.newTrigger('sendMonthlySummary').timeBased().onMonthDay(1).atHour(8).create();
-  Logger.log('Triggers installed: recurring daily ~6am, fund reminders daily ~7am, weekly summary Sunday ~8pm, monthly summary on the 1st ~8am (script time zone).');
+  ScriptApp.newTrigger('runBackup').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(2).create();
+  Logger.log('Triggers installed: recurring daily ~6am, fund reminders daily ~7am, weekly summary Sunday ~8pm, monthly summary on the 1st ~8am, backup Sunday ~2am (script time zone).');
+}
+
+// ======================================================================
+// Backup and health check
+// ======================================================================
+
+const BACKUP_PREFIX = 'Expense Tracker backup ';
+const BACKUP_FOLDER_NAME = 'Expense Tracker backups';
+const BACKUP_KEEP = 8;   // the newest copies kept; older ones go to the Drive bin
+
+/** The Drive folder that holds the backups. Made on first use, remembered by id, made again if it was deleted. */
+function backupFolder_() {
+  const props = PropertiesService.getScriptProperties(), id = props.getProperty('BACKUP_FOLDER_ID');
+  if (id) {
+    try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) { /* made again below */ }
+  }
+  const folder = DriveApp.createFolder(BACKUP_FOLDER_NAME);
+  props.setProperty('BACKUP_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+/**
+ * Makes a dated copy of the whole spreadsheet in the backup folder and keeps the newest BACKUP_KEEP copies.
+ * Runs every Sunday ~2am (installTriggers) and from the menu. The result is kept for the health check; a failure is
+ * written to the Audit tab and emailed to the summary recipients.
+ */
+function runBackup() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let res;
+  try {
+    const stamp = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd HHmm');
+    const folder = backupFolder_();
+    const copy = DriveApp.getFileById(ss.getId()).makeCopy(BACKUP_PREFIX + stamp, folder);
+    const files = [], it = folder.getFiles();
+    while (it.hasNext()) { const f = it.next(); if (String(f.getName()).indexOf(BACKUP_PREFIX) === 0) files.push(f); }
+    files.sort(function (a, b) { return b.getDateCreated() - a.getDateCreated(); });
+    files.slice(BACKUP_KEEP).forEach(function (f) { f.setTrashed(true); });
+    res = { at: new Date().toISOString(), ok: true, name: copy.getName(), kept: Math.min(files.length, BACKUP_KEEP) };
+  } catch (err) {
+    res = { at: new Date().toISOString(), ok: false, error: String((err && err.message) || err).slice(0, 300) };
+  }
+  PropertiesService.getScriptProperties().setProperty('LAST_BACKUP', JSON.stringify(res));
+  audit_('system', res.ok ? 'backup' : 'backup failed', res.ok ? res.name : res.error);
+  if (!res.ok) {
+    try {
+      const to = getSummaryEmails_().join(',') || Session.getEffectiveUser().getEmail();
+      MailApp.sendEmail({ to: to, subject: 'Family Expense Tracker: the weekly backup failed', body: 'The backup of your expense sheet did not run.\n\nReason: ' + res.error +
+        '\n\nIn the sheet use Expense Tracker > Back up now to try again. If it keeps failing, Google may need you to approve access to Drive: run the function installTriggers in Apps Script once.' });
+    } catch (e) { /* nothing more to try */ }
+  }
+  return res;
+}
+
+/** Menu item: backs up now and says what happened. */
+function backupNow() {
+  const ui = SpreadsheetApp.getUi(), res = runBackup();
+  ui.alert(res.ok ? 'Backup made' : 'The backup did not work', res.ok ? 'A copy named "' + res.name + '" is in your Drive folder "' + BACKUP_FOLDER_NAME + '". The newest ' + BACKUP_KEEP + ' copies are kept.' : res.error, ui.ButtonSet.OK);
+}
+
+/** Menu item: shows where the backups are. */
+function openBackupFolder() {
+  const ui = SpreadsheetApp.getUi();
+  try { ui.alert('Backup folder', backupFolder_().getUrl(), ui.ButtonSet.OK); }
+  catch (e) { ui.alert('Backup folder', 'Could not open it: ' + e.message, ui.ButtonSet.OK); }
+}
+
+/** For the app's connection check: is everything set up and working? Nothing private in it. */
+function healthCheck_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const handlers = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
+  const triggers = {};
+  ['runRecurring', 'checkFundReminders', 'sendWeeklySummary', 'sendMonthlySummary', 'runBackup'].forEach(function (h) { triggers[h] = handlers.indexOf(h) !== -1; });
+  let quota = null, last = null;
+  try { quota = MailApp.getRemainingDailyQuota(); } catch (e) { /* unknown */ }
+  try { last = JSON.parse(PropertiesService.getScriptProperties().getProperty('LAST_BACKUP') || 'null'); } catch (e) { /* none */ }
+  const missing = [EXPENSES, SETTINGS, PLAN, FUNDS, RECURRING, REFLECTIONS, DEVICES, AUDIT, DASHBOARD].filter(function (n) { return !ss.getSheetByName(n); });
+  const ex = ss.getSheetByName(EXPENSES);
+  return { ok: true, version: VERSION, now: new Date().toISOString(), tz: ss.getSpreadsheetTimeZone(), triggers: triggers, emailQuota: quota,
+           lastBackup: last, missingTabs: missing, expenseRows: ex ? Math.max(0, ex.getLastRow() - 1) : 0 };
 }
 
 // ======================================================================

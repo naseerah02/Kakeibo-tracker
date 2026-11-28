@@ -742,15 +742,18 @@
     });
     return out + '<line x1="0" y1="' + base + '" x2="300" y2="' + base + '" style="stroke:var(--line)"/></svg>';
   }
-  function targetRow(f) {
+  function targetColor(f) { return f.status === 'reached' ? 'var(--ok)' : (f.status === 'behind' || f.status === 'overdue' || f.status === 'past') ? 'var(--warn)' : ''; }
+  function targetMsg(f) {
     var days = daysBetween(todayStr(), f.targetDate);
-    var color = f.status === 'reached' ? 'var(--ok)' : (f.status === 'behind' || f.status === 'overdue' || f.status === 'past') ? 'var(--warn)' : '';
     var m = f.status === 'reached' ? t('t.reached') : (f.status === 'overdue' || f.status === 'past') ? t('t.passed') : tn('t.days', days, { days: days });
     if (f.status === 'behind') m += t('t.behind', { needed: money(f.needed), planned: money(f.planned) });
     else if (f.status === 'on-track') m += t('t.ontrack');
-    return barRow(f.name, f.progress + '%', f.progress, color) +
-      '<p class="meta" style="margin:0 0 6px">' + t('t.line', { bal: money(f.balance), target: money(f.target), date: esc(f.targetDate), msg: m }) + '</p>';
+    return m;
   }
+  function targetLine(f) {
+    return '<p class="meta" style="margin:0 0 6px">' + t('t.line', { bal: money(f.balance), target: money(f.target), date: esc(f.targetDate), msg: targetMsg(f) }) + '</p>';
+  }
+  function targetRow(f) { return barRow(f.name, f.progress + '%', f.progress, targetColor(f)) + targetLine(f); }
   function showMonth(d, stale, n) {
     var s = d.stats, p = d.prev, h = '<b>' + esc(I18N.label(s.label)) + '</b>';
     var left = s.remaining, isOver = left !== null && left < 0;
@@ -809,7 +812,9 @@
     $('monBody').innerHTML = h;
   }
   async function loadMonth() {
-    var n = +$('monPeriod').value, date = monthDate(n), key = 'month:' + date.slice(0, 7);
+    var sel = +$('monPeriod').value;
+    if (sel >= 3) { await loadYear(sel - 3); return; }   // "This year" and "Last year"
+    var n = sel, date = monthDate(n), key = 'month:' + date.slice(0, 7);
     var cached = await Core.kvGet(key);
     if (cached) showMonth(cached, true, n); else $('monBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>';
     if (!conn || !conn.token) return;
@@ -820,6 +825,115 @@
       else if (r && r.error === 'Not authorised') needAuth(t('auth.short'));
     } catch (e) {
       if (!cached) $('monBody').innerHTML = t('m.offline');
+    }
+  }
+
+  // ---------- Reports: the year report with its monthly scorecard ----------
+  function scCell(n) { return n === null || n === undefined ? '-' : (n < 0 ? '-' : '') + short(Math.abs(n)); }
+  function splitBlock(byType) {
+    var total = 0; KAKEIBO.forEach(function (ty) { total += byType[ty]; });
+    if (!total) return '<p class="hint">' + esc(t('m.nospend')) + '</p>';
+    return '<div class="stack">' + KAKEIBO.map(function (ty) {
+      return byType[ty] ? '<div style="width:' + (byType[ty] / total * 100).toFixed(1) + '%;background:' + TYPE_COLORS[ty] + '"></div>' : '';
+    }).join('') + '</div><div class="legend">' + KAKEIBO.map(function (ty) {
+      return '<span><span class="dot" style="background:' + TYPE_COLORS[ty] + '"></span>' + esc(typeLabel(ty)) + ' ' + fmt(byType[ty]) + ' (' + Math.round(byType[ty] / total * 100) + '%)</span>';
+    }).join('') + '</div>';
+  }
+  function rankBars(list, labelKey) {
+    var max = list.length ? list[0].amount || 1 : 1;
+    return list.map(function (x) { return barRow(x[labelKey], fmt(x.amount), x.amount / max * 100); }).join('');
+  }
+  function showYear(d, stale) {
+    var T = d.totals, h = '<b>' + esc(t('yr.title', { year: d.year })) + '</b>';
+    if (!d.months.length || (T.spent === 0 && T.fixedPaid === 0 && T.income === 0)) { $('monBody').innerHTML = h + '<p class="hint">' + esc(t('yr.nodata')) + '</p>'; return; }
+    var hasInc = T.income > 0;
+    var kpi = function (label, value, neg) { return '<div><small>' + esc(label) + '</small><b class="' + (neg ? 'neg' : '') + '">' + value + '</b></div>'; };
+    h += '<div class="kpis">' + kpi(t('yr.income'), hasInc ? money(T.income) : '-') + kpi(t('yr.spent'), money(T.spent)) +
+         kpi(t('yr.left'), hasInc ? signed(T.left) : '-', hasInc && T.left < 0) + '</div>';
+    h += '<div class="kpis">' + kpi(t('yr.rate'), T.savingsRate === null ? '-' : T.savingsRate + '%', T.savingsRate !== null && T.savingsRate < 0) +
+         kpi(t('yr.goal'), T.goalMonths ? esc(t('yr.goal.val', { met: T.goalMet, n: T.goalMonths })) : '-') +
+         kpi(t('yr.over'), hasInc ? esc(tn('yr.over.val', T.overAllowance)) : '-', hasInc && T.overAllowance > 0) + '</div>';
+    var note = [t('yr.avg') + ': ' + money(T.avgSpent)];
+    if (d.prev && d.prev.spent > 0) {
+      var diff = Math.round((T.spent - d.prev.spent) / d.prev.spent * 100);
+      note.push(diff === 0 ? t('yr.vs.same', { year: d.prev.year }) : diff > 0 ? t('yr.vs.up', { pct: Math.abs(diff), year: d.prev.year }) : t('yr.vs.down', { pct: Math.abs(diff), year: d.prev.year }));
+    }
+    h += '<p class="hint" style="margin:6px 0 0">' + note.join(' &middot; ') + '</p>';
+
+    h += '<h3 class="sec">' + esc(t('sc.title')) + '</h3><table class="tbl sc"><thead><tr><th>' + esc(t('sc.h.month')) + '</th><th>' + esc(t('sc.h.income')) + '</th><th>' +
+         esc(t('sc.h.spent')) + '</th><th>' + esc(t('sc.h.left')) + '</th><th>' + esc(t('sc.h.goal')) + '</th></tr></thead><tbody>' +
+      d.months.map(function (m) {
+        var over = m.variance !== null && m.variance < 0;
+        return '<tr><td>' + esc(I18N.label(MON3[+m.month.slice(5, 7) - 1])) + '</td><td>' + scCell(m.income) + '</td><td class="' + (over ? 'no' : '') + '">' + scCell(m.spent) +
+               '</td><td class="' + (m.left !== null && m.left < 0 ? 'no' : '') + '">' + scCell(m.left) + '</td><td>' +
+               (m.goalMet === null ? '&ndash;' : m.goalMet ? '<span class="yes">\u2713</span>' : '<span class="no">\u2717</span>') + '</td></tr>';
+      }).join('') +
+      '<tr class="total"><td>' + esc(t('sc.total')) + '</td><td>' + (hasInc ? scCell(T.income) : '-') + '</td><td>' + scCell(T.spent) + '</td><td>' + (hasInc ? scCell(T.left) : '-') +
+      '</td><td>' + (T.goalMonths ? T.goalMet + '/' + T.goalMonths : '&ndash;') + '</td></tr></tbody></table><p class="meta">' + esc(t('sc.note')) + '</p>';
+
+    var hl = [];
+    if (T.highest) hl.push(esc(t('yr.high')) + ': <b>' + esc(monthText(T.highest.month)) + '</b> ' + money(T.highest.spent));
+    if (T.lowest) hl.push(esc(t('yr.low')) + ': <b>' + esc(monthText(T.lowest.month)) + '</b> ' + money(T.lowest.spent));
+    if (d.biggest) hl.push(esc(t('yr.big')) + ': <b>' + money(d.biggest.amount) + '</b> &middot; ' + esc(d.biggest.category) + ' &middot; ' + esc(d.biggest.date) +
+                           (d.biggest.remarks ? ' &middot; ' + esc(d.biggest.remarks) : '') + (d.biggest.person ? ' &middot; ' + esc(d.biggest.person) : ''));
+    if (hl.length) h += '<p class="hint" style="margin:10px 0 0">' + hl.join('<br>') + '</p>';
+
+    h += '<h3 class="sec">' + t('m.split') + '</h3>' + splitBlock(d.byType);
+    var cats = (d.categories || []).slice(0, 8);
+    if (cats.length) h += '<h3 class="sec">' + esc(t('yr.cats')) + '</h3>' + cats.map(function (c) { return barRow(c.category, fmt(c.amount) + ' (' + c.pct + '%)', c.amount / cats[0].amount * 100); }).join('');
+    if ((d.people || []).length > 1) h += '<h3 class="sec">' + esc(t('yr.people')) + '</h3>' + rankBars(d.people, 'person');
+    if ((d.payments || []).length > 1) h += '<h3 class="sec">' + esc(t('yr.pay')) + '</h3>' + rankBars(d.payments, 'mode');
+    if ((d.funds || []).length) {
+      h += '<h3 class="sec">' + esc(t('yr.funds')) + '</h3>' + d.funds.map(function (f) {
+        return '<p class="hint" style="margin:0 0 4px">' + esc(t('yr.fund.line', { name: f.name, start: money(f.startBalance), c: money(f.collected), s: money(f.spent), end: signed(f.endBalance) })) + '</p>';
+      }).join('');
+    }
+    if (stale) h += t('m.last');
+    $('monBody').innerHTML = h;
+  }
+  async function loadYear(which) {
+    var year = +todayStr().slice(0, 4) - which, key = 'year:' + year, sel = which + 3;
+    var cached = await Core.kvGet(key);
+    if (cached && cached.v === 1) showYear(cached, true); else { cached = null; $('monBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>'; }
+    if (!conn || !conn.token) return;
+    try {
+      var r = await Core.api(conn, 'year_report', { year: year });
+      if (+$('monPeriod').value !== sel) return;
+      if (r && r.ok) { await Core.kvSet(key, r); showYear(r, false); }
+      else if (r && r.error === 'Not authorised') needAuth(t('auth.short'));
+    } catch (e) {
+      if (!cached) $('monBody').innerHTML = t('yr.offline');
+    }
+  }
+
+  // ---------- Funds: the overview of every fund ----------
+  function fundCard(f) {
+    var h = '<div class="fundcard" data-fo="' + esc(f.name) + '"><div class="fchead"><b>' + esc(f.name) + '</b><b class="' + (f.balance < 0 ? 'neg' : '') + '">' + signed(f.balance) + '</b></div>';
+    if (f.target > 0 && f.targetDate) h += barRow(t('fo.st.' + (f.status === 'on-track' ? 'ontrack' : f.status)), f.progress + '%', f.progress, targetColor(f)) + targetLine(f);
+    else h += '<p class="meta" style="margin:0 0 4px">' + esc(t('fo.notarget')) + '</p>';
+    return h + '<div class="meta">' + t('fo.collected', { c: money(f.collectedToDate), s: money(f.spentToDate) }) + '</div>' +
+           '<div class="meta">' + esc(t('fo.month', { c: money(f.thisMonthCollected), s: money(f.thisMonthSpent) })) + '</div></div>';
+  }
+  function showOverview(d, stale) {
+    var tot = d.totals;
+    var h = '<div class="kpis"><div><small>' + esc(t('fo.balance')) + '</small><b class="' + (tot.balance < 0 ? 'neg' : '') + '">' + signed(tot.balance) + '</b></div>' +
+            '<div><small>' + esc(t('fo.togo')) + '</small><b>' + (tot.target > 0 ? money(tot.remaining) : '-') + '</b></div>' +
+            '<div><small>' + esc(t('fo.behind')) + '</small><b class="' + (tot.behind ? 'neg' : '') + '">' + tot.behind + '</b></div></div>' +
+            '<p class="hint" style="margin:0 0 4px">' + esc(t('fo.hint')) + '</p>' + (d.funds || []).map(fundCard).join('');
+    if (stale) h += t('m.last');
+    $('fsBody').innerHTML = h;
+  }
+  async function loadOverview() {
+    var key = 'funds:all', cached = await Core.kvGet(key);
+    if (cached && cached.v === 1) showOverview(cached, true); else { cached = null; $('fsBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>'; }
+    if (!conn || !conn.token) return;
+    try {
+      var r = await Core.api(conn, 'funds_overview');
+      if ($('fsPick').value !== '__all') return;
+      if (r && r.ok) { await Core.kvSet(key, r); showOverview(r, false); }
+      else if (r && r.error === 'Not authorised') needAuth(t('auth.short'));
+    } catch (e) {
+      if (!cached) $('fsBody').innerHTML = t('fo.offline');
     }
   }
 
@@ -873,11 +987,14 @@
   }
   async function loadFunds() {
     var list = (cfg && cfg.funds) || [];
-    fill($('fsPick'), list.map(function (f) { return f.name; }));
+    fill($('fsPick'), ['__all'].concat(list.map(function (f) { return f.name; })), function (v) { return v === '__all' ? t('fo.all') : v; });
     if (!cfg) { $('fsBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>'; return; }
     if (!list.length) { $('fsBody').innerHTML = '<p class="hint">' + esc(t('fs.none')) + '</p>'; return; }
-    if (fsFund && list.some(function (f) { return f.name === fsFund; })) $('fsPick').value = fsFund;
-    var name = $('fsPick').value; fsFund = name;
+    var want = fsFund || '__all';
+    if (want !== '__all' && !list.some(function (f) { return f.name === want; })) want = '__all';
+    $('fsPick').value = want; fsFund = want;
+    if (want === '__all') { await loadOverview(); return; }   // the first view: every fund on one screen
+    var name = want;
     var key = 'fund:' + norm(name);
     var cached = await Core.kvGet(key);
     if (cached && cached.v === 2) showFund(cached, true); else { cached = null; $('fsBody').innerHTML = '<p class="hint">' + esc(t('sum.loading')) + '</p>'; }   // a statement saved by an older version is ignored
@@ -907,6 +1024,8 @@
   $('monPeriod').addEventListener('change', loadMonth);
   $('fsPick').addEventListener('change', function () { fsFund = $('fsPick').value; loadFunds(); });
   $('fsBody').addEventListener('click', function (ev) {
+    var card = ev.target.closest('[data-fo]');
+    if (card) { fsFund = card.getAttribute('data-fo'); loadFunds(); return; }
     var b = ev.target.closest('button[data-fspay]');
     if (b) { switchTab('add'); chooseFund(norm(b.getAttribute('data-fspay'))); return; }
     var dpb = ev.target.closest('button[data-fsdep]');
@@ -1036,7 +1155,7 @@
     var n = queue.length;
     if (!confirm(n ? t('reset.confirm.n', { n: n }) : t('reset.confirm'))) return;
     ['conn', 'cfg', 'pin', 'bio', 'prefs', 'favs', 'recent', 'fundNoteDay'].forEach(function (k) { Core.kvDel(k); });
-    (await Core.kvKeys()).forEach(function (k) { if (/^(summary|month|fund):/.test(String(k))) Core.kvDel(k); });
+    (await Core.kvKeys()).forEach(function (k) { if (/^(summary|month|fund|funds|year):/.test(String(k))) Core.kvDel(k); });
     await Core.qClear();
     conn = null; cfg = null; pinRec = null; bioRec = null; queue = []; favs = []; prefs = {}; recent = []; fundNoteDay = ''; forceActivate = false; forgot = false; formReady = false;
     say('', ''); route();
